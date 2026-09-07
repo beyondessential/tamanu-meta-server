@@ -46,7 +46,7 @@ Where that close is notified, the notice says maintenance was declared, so a rea
 
 Canopy-wide checks are Canopy monitoring its own operation, and are never suspended by a window over a machine or a group (see [SELF](../private-server/self-alerts.md)).
 
-A window also holds off configuration runs by others: while it holds, the inventory of every environment it covers is refused to anyone but the operator who declared it (see [INV](../private-server/inventory.md), "Work under way").
+A window also holds off configuration runs by others: while it holds, no one but the operator who declared it can take a run lease on an environment it covers (see [INV](../private-server/inventory.md), "Work under way").
 
 ## Ending
 

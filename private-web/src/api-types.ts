@@ -2673,6 +2673,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/inventory/extend_lease": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Push a held lease's expiry out, so a run still going keeps the environment.
+         * @description Only the holder can extend, and only while the lease is unreleased: one that
+         *     has been released is gone, and taking a fresh one goes through the same
+         *     refusals a first one does.
+         */
+        post: operations["inventory_extend_lease"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/inventory/for_group": {
         parameters: {
             query?: never;
@@ -2683,17 +2705,10 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Serve one environment's inventory.
-         * @description Refuses a group Canopy does not have, one that has been archived, one
-         *     holding several environments with no rank named, a rank with no live
-         *     application to configure, an environment someone else has work under way on
-         *     (a maintenance window they declared, or a secret variable they set moments
-         *     ago), an upgrade of production with no plan recorded, and a secret variable
-         *     whose value cannot be read, saying which it was: a refusal is a decision to
-         *     respect, and a caller has to be able to tell it from Canopy being
-         *     unreachable.
-         *
-         *     Requires admin access, the inventory carrying the secret variables' values.
+         * Serve the inventory of the environment the caller holds the lease on.
+         * @description Refuses a lease that is not the caller's or no longer holds, and a secret
+         *     variable whose value cannot be read: a run receiving a machine that looks
+         *     configured and is missing a value is worse than one that does not run.
          */
         post: operations["inventory_for_group"];
         delete?: never;
@@ -2702,7 +2717,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/inventory_secrets/for_group": {
+    "/api/inventory/lease_for_group": {
         parameters: {
             query?: never;
             header?: never;
@@ -2712,19 +2727,19 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * The names a group carries, at every scope under it.
-         * @description Names only: a value is served solely as part of an inventory, and only to an
-         *     administrator. Available to any operator, so the group page can show which
-         *     variables are set without one.
+         * The lease held over an environment, so the group page can say a run would
+         *     be refused and by whom.
+         * @description Null where none holds, an expired lease included. Available to any operator:
+         *     it names who is running and until when, and carries nothing a run receives.
          */
-        post: operations["inventory_secrets_for_group"];
+        post: operations["inventory_lease_for_group"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/api/inventory_secrets/remove": {
+    "/api/inventory/release_lease": {
         parameters: {
             query?: never;
             header?: never;
@@ -2734,18 +2749,18 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Forget a secret variable, value and all.
-         * @description The declaration goes first, so a value the secret store will not let go of
-         *     leaves nothing behind that would refuse every later read of the inventory.
+         * Give the environment back when the run ends.
+         * @description Releasing is audited with who did it, since it can be another operator
+         *     taking work over rather than the holder finishing.
          */
-        post: operations["inventory_secrets_remove"];
+        post: operations["inventory_release_lease"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/api/inventory_secrets/set": {
+    "/api/inventory/take_lease": {
         parameters: {
             query?: never;
             header?: never;
@@ -2755,11 +2770,80 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Set or replace a secret variable.
-         * @description Refuses a name already set as a tag in the same scope, and a name the secret
-         *     store cannot key a value under.
+         * Take the environment's run lease.
+         * @description Refuses a group canopy does not have, one that has been archived, one
+         *     holding several environments with no rank named, a rank with no live
+         *     application to configure, an environment another operator holds or has
+         *     declared maintenance over, and an upgrade of production with no plan
+         *     recorded, saying which it was so an operator knows what to do or who to
+         *     wait for.
          */
-        post: operations["inventory_secrets_set"];
+        post: operations["inventory_take_lease"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/inventory_variables/for_group": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Everything set under a group: its own, its environments', and those of the
+         *     machines in it.
+         * @description A secret's value is not among them; it is served only as part of an
+         *     inventory, and only to an administrator.
+         */
+        post: operations["inventory_variables_for_group"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/inventory_variables/remove": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Forget a variable, value and all.
+         * @description The row goes first, so a value the secret store will not let go of leaves
+         *     nothing behind that would refuse every later read of the inventory.
+         */
+        post: operations["inventory_variables_remove"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/inventory_variables/set": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Set or replace a variable.
+         * @description A secret's value goes to the secret store keyed by name, and the row holds
+         *     no value at all. Turning a secret into a plain variable forgets the stored
+         *     value, so a later switch back never resurrects a stale one.
+         */
+        post: operations["inventory_variables_set"];
         delete?: never;
         options?: never;
         head?: never;
@@ -5803,6 +5887,20 @@ export interface components {
              */
             ticket: string;
         };
+        /**
+         * @description Which environment to act on: exactly one of the group's identifier or its
+         *     name, and the rank where the group holds more than one environment.
+         */
+        EnvironmentArgs: {
+            /** @description Name of the server group, matched exactly. */
+            group?: string | null;
+            rank?: null | components["schemas"]["ServerRank"];
+            /**
+             * Format: uuid
+             * @description Identifier of the server group.
+             */
+            server_group_id?: string | null;
+        };
         /** @description Request body for running a query in the SQL playground. */
         ExecuteArgs: {
             /** @description The query to execute. */
@@ -6583,76 +6681,103 @@ export interface components {
              */
             semantics?: string[];
         };
-        /**
-         * @description Which environment to serve the inventory for: exactly one of the group's
-         *     identifier or its name, and the rank where the group holds more than one
-         *     environment.
-         */
-        InventoryArgs: {
-            /** @description Name of the server group, matched exactly. */
-            group?: string | null;
-            /** @description What the run is doing to the environment. Configuring where not named. */
-            intent?: components["schemas"]["RunIntent"];
-            rank?: null | components["schemas"]["ServerRank"];
-            /**
-             * Format: uuid
-             * @description Identifier of the server group.
-             */
-            server_group_id?: string | null;
-        };
-        /** @description One application in an environment. */
-        InventoryHost: {
-            /**
-             * @description The address to reach the application at: the tailnet name of the device
-             *     bound to its machine, or its own recorded host where no device is bound.
-             *     Null when Canopy holds neither, in which case a variable has to supply
-             *     it.
-             */
-            address?: string | null;
+        /** @description One application on a machine, so a run knows what it is configuring there. */
+        InventoryApplication: {
             /**
              * Format: uuid
              * @description Identifier of the application.
              */
             id: string;
             /**
-             * Format: uuid
-             * @description Identifier of the machine the application runs on.
-             */
-            machine_id: string;
-            /**
              * @description The application's name within its group, falling back to its host and
-             *     then its identifier, so a member always has something to be addressed
-             *     as.
+             *     then its identifier.
              */
             name: string;
-            /**
-             * @description The variables the application sets itself, so a value inherited from the
-             *     group can be told from one set here even where the two agree.
-             */
-            own_vars: components["schemas"]["VarMap"];
-            /**
-             * @description Which of `vars` are secret, so a caller can keep them out of anything it
-             *     writes down.
-             */
-            secret_vars: string[];
             /** @description What the application is: the software and the role it plays together. */
             type: components["schemas"]["ApplicationType"];
+        };
+        /** @description Read an environment's inventory under a lease held on it. */
+        InventoryArgs: {
             /**
-             * @description The application's effective variables: its own tags over its group's,
-             *     with the reserved read-only tags left out. This is what a run acts on.
+             * Format: uuid
+             * @description Identifier of the lease the run holds, from `take_lease`.
+             */
+            lease_id: string;
+        };
+        /** @description One machine in an environment. */
+        InventoryHost: {
+            /**
+             * @description The address to reach it at: an `ansible_host` variable, the tailnet name
+             *     of the device bound to it, or the recorded host of an application on it.
+             *     Null where canopy holds none of those.
+             */
+            address?: string | null;
+            /** @description The applications the machine carries in this environment, by name. */
+            applications: components["schemas"]["InventoryApplication"][];
+            /**
+             * Format: uuid
+             * @description Identifier of the machine.
+             */
+            id: string;
+            /** @description The machine's name, falling back to its identifier. */
+            name: string;
+            /**
+             * @description The variables the machine sets itself, so a value inherited from a wider
+             *     scope can be told from one set here even where the two agree.
+             */
+            own_vars: components["schemas"]["VarMap"];
+            /** @description Which of `vars` are secret. */
+            secret_vars: string[];
+            /**
+             * @description The effective variables: the machine's over the environment's over the
+             *     group's. This is what a run acts on.
              */
             vars: components["schemas"]["VarMap"];
         };
-        /**
-         * @description A declared secret variable: its name, the scope it is set at, and who last
-         *     set it.
-         */
-        InventorySecretVariable: {
+        /** @description A run's hold on one environment. */
+        InventoryLease: {
+            /**
+             * Format: date-time
+             * @description When it stops holding unless extended.
+             */
+            expires_at: string;
+            /** @description The login the lease is held by. */
+            held_by?: string | null;
             /**
              * Format: uuid
-             * @description Set for a variable belonging to one application.
+             * @description Unique identifier of this lease, which a run names to read the
+             *     inventory.
              */
-            application_id?: string | null;
+            id: string;
+            /** @description What the run holding it intends. */
+            intent: components["schemas"]["RunIntent"];
+            /** @description What the holder said they are doing. */
+            note?: string | null;
+            /** @description The rank of the environment within it. */
+            rank: components["schemas"]["ServerRank"];
+            /**
+             * Format: date-time
+             * @description When it was released, and `None` while it is still held.
+             */
+            released_at?: string | null;
+            /** @description Who released it. */
+            released_by?: string | null;
+            /**
+             * Format: uuid
+             * @description The group the environment belongs to.
+             */
+            server_group_id: string;
+            /**
+             * Format: date-time
+             * @description When it was taken.
+             */
+            taken_at: string;
+        };
+        /**
+         * @description One variable: where it is set, its name, and its value where it is not a
+         *     secret.
+         */
+        InventoryVariable: {
             /**
              * Format: date-time
              * @description When the name was first set here.
@@ -6660,15 +6785,22 @@ export interface components {
             created_at: string;
             /**
              * Format: uuid
-             * @description Unique identifier of this declaration.
+             * @description Unique identifier of this variable.
              */
             id: string;
-            /** @description The variable's name, and the key its value is stored under. */
+            /** @description Whether the value is a secret. Applies to the whole value. */
+            is_secret: boolean;
+            /**
+             * Format: uuid
+             * @description Set for a variable belonging to one machine.
+             */
+            machine_id?: string | null;
+            /** @description The variable's name, unique within its scope. */
             name: string;
             rank?: null | components["schemas"]["ServerRank"];
             /**
              * Format: uuid
-             * @description Set with `rank` for a variable belonging to one environment.
+             * @description Set for a variable belonging to a group or to one of its environments.
              */
             server_group_id?: string | null;
             /** @description The login that last set the value. */
@@ -6678,11 +6810,10 @@ export interface components {
              * @description When its value was last replaced.
              */
             updated_at: string;
+            /** @description The value, and `None` for a secret, whose value is in the secret store. */
+            value?: unknown;
         };
-        /**
-         * @description An environment's inventory: its applications and the variables that
-         *     configure them.
-         */
+        /** @description An environment's inventory. */
         InventoryView: {
             /** @description Name of the server group. */
             group: string;
@@ -6691,16 +6822,15 @@ export interface components {
              * @description Identifier of the server group the inventory covers.
              */
             group_id: string;
-            /** @description The environment's applications, ordered by name. */
+            /** @description The environment's machines, ordered by name. */
             hosts: components["schemas"]["InventoryHost"][];
             /** @description Rank of the environment served. */
             rank: components["schemas"]["ServerRank"];
             /** @description Which of `vars` are secret. */
             secret_vars: string[];
             /**
-             * @description Variables belonging to the environment rather than to any one
-             *     application. Every application carries these too, under its own
-             *     overrides.
+             * @description The group's and the environment's variables, merged. Every machine
+             *     below carries these too, under its own overrides.
              */
             vars: components["schemas"]["VarMap"];
         };
@@ -7086,6 +7216,14 @@ export interface components {
             total_elapsed: number;
             /** @description Whether the migrations applied. */
             verdict: components["schemas"]["Verdict"];
+        };
+        /** @description Name a lease. */
+        LeaseArgs: {
+            /**
+             * Format: uuid
+             * @description Identifier of the lease.
+             */
+            lease_id: string;
         };
         /** @description The window to lift. */
         LiftArgs: {
@@ -8655,7 +8793,7 @@ export interface components {
              */
             patch: number;
         };
-        /** @description Name one secret variable to forget. */
+        /** @description Name one variable to forget. */
         RemoveArgs: components["schemas"]["ScopeArgs"] & {
             /** @description The variable's name. */
             name: string;
@@ -9150,8 +9288,7 @@ export interface components {
             id: string;
         };
         /**
-         * @description What a run intends to do to the environment it reads. An upgrade of a
-         *     production environment needs the group's open upgrade plan behind it.
+         * @description What a run intends to do to the environment it holds.
          * @enum {string}
          */
         RunIntent: "configure" | "upgrade";
@@ -9286,8 +9423,17 @@ export interface components {
             /** @description Backup type this override applies to. */
             type: string;
         };
-        /** @description Which scope a request addresses: an environment, or one application. */
+        /**
+         * @description Which scope a request addresses: a group, one of its environments, or one
+         *     machine.
+         */
         ScopeArgs: {
+            /**
+             * Format: uuid
+             * @description Identifier of the machine.
+             */
+            machine_id: string;
+        } | {
             /** @description Rank of the environment within it. */
             rank: components["schemas"]["ServerRank"];
             /**
@@ -9296,14 +9442,6 @@ export interface components {
              */
             server_group_id: string;
         } | {
-            /**
-             * Format: uuid
-             * @description Identifier of the application.
-             */
-            application_id: string;
-        };
-        /** @description Which group's declarations to list. */
-        SecretsForGroupArgs: {
             /**
              * Format: uuid
              * @description Identifier of the server group.
@@ -9899,15 +10037,17 @@ export interface components {
              */
             server_id: string;
         };
-        /** @description Set or replace one secret variable's value. */
+        /** @description Set or replace one variable. */
         SetArgs: components["schemas"]["ScopeArgs"] & {
             /** @description The variable's name. */
             name: string;
             /**
-             * @description The value. Decoded on the way out the same way a tag is, so `true`,
-             *     `false`, and a JSON array or object arrive as themselves.
+             * @description Whether the value is a secret, held in the secret store and served only
+             *     as part of an inventory.
              */
-            value: string;
+            secret?: boolean;
+            /** @description The value, as JSON. */
+            value: unknown;
         };
         /** @description Request to enable or disable a server's backup capability for one type. */
         SetCapabilityArgs: {
@@ -10432,6 +10572,15 @@ export interface components {
             /** @description The tailnet (Tailscale network) this node belongs to. */
             tailnet: string;
         };
+        /** @description Take the lease on an environment, which a run holds while it runs. */
+        TakeLeaseArgs: components["schemas"]["EnvironmentArgs"] & {
+            /** @description What the run intends. Configuring where not named. */
+            intent?: components["schemas"]["RunIntent"];
+            /** @description What the holder is doing, shown to whoever is refused meanwhile. */
+            note?: string | null;
+            /** @description Take over a lease another operator holds, which is audited. */
+            take_over?: boolean;
+        };
         /** @description The target a window covers: exactly one of the two is set. */
         TargetArgs: {
             /**
@@ -10680,6 +10829,14 @@ export interface components {
         /** @description Variables as a JSON object. */
         VarMap: {
             [key: string]: unknown;
+        };
+        /** @description Which group's variables to list. */
+        VariablesForGroupArgs: {
+            /**
+             * Format: uuid
+             * @description Identifier of the server group.
+             */
+            server_group_id: string;
         };
         /**
          * @description Where a (server, version) pair stands.
@@ -14478,6 +14635,47 @@ export interface operations {
             };
         };
     };
+    inventory_extend_lease: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LeaseArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InventoryLease"];
+                };
+            };
+            /** @description No such lease */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            /** @description Held by someone else, or no longer held */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
     inventory_for_group: {
         parameters: {
             query?: never;
@@ -14499,16 +14697,7 @@ export interface operations {
                     "application/json": components["schemas"]["InventoryView"];
                 };
             };
-            /** @description Neither or both of the group arguments */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ProblemDetailsSchema"];
-                };
-            };
-            /** @description No such server group */
+            /** @description No such lease */
             404: {
                 headers: {
                     [name: string]: unknown;
@@ -14517,7 +14706,7 @@ export interface operations {
                     "application/json": components["schemas"]["ProblemDetailsSchema"];
                 };
             };
-            /** @description Archived, empty, ambiguously named, spanning environments, under someone else's work, or an unplanned upgrade of production */
+            /** @description The lease is someone else's, no longer holds, or the environment is gone */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -14537,7 +14726,7 @@ export interface operations {
             };
         };
     };
-    inventory_secrets_for_group: {
+    inventory_lease_for_group: {
         parameters: {
             query?: never;
             header?: never;
@@ -14546,7 +14735,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["SecretsForGroupArgs"];
+                "application/json": components["schemas"]["EnvironmentArgs"];
             };
         };
         responses: {
@@ -14555,7 +14744,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["InventorySecretVariable"][];
+                    "application/json": null | components["schemas"]["InventoryLease"];
                 };
             };
             /** @description No such server group */
@@ -14569,7 +14758,122 @@ export interface operations {
             };
         };
     };
-    inventory_secrets_remove: {
+    inventory_release_lease: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LeaseArgs"];
+            };
+        };
+        responses: {
+            /** @description Released */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description No such lease, or it was already released */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    inventory_take_lease: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TakeLeaseArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InventoryLease"];
+                };
+            };
+            /** @description Neither or both of the group arguments */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            /** @description No such server group */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            /** @description Archived, empty, ambiguously named, spanning environments, held by someone else, under someone else's maintenance, or an unplanned upgrade of production */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    inventory_variables_for_group: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["VariablesForGroupArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InventoryVariable"][];
+                };
+            };
+            /** @description No such server group */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    inventory_variables_remove: {
         parameters: {
             query?: never;
             header?: never;
@@ -14611,7 +14915,7 @@ export interface operations {
             };
         };
     };
-    inventory_secrets_set: {
+    inventory_variables_set: {
         parameters: {
             query?: never;
             header?: never;
@@ -14629,10 +14933,10 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["InventorySecretVariable"];
+                    "application/json": components["schemas"]["InventoryVariable"];
                 };
             };
-            /** @description Bad name, or a tag of that name */
+            /** @description Not a usable variable name */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -14641,7 +14945,7 @@ export interface operations {
                     "application/json": components["schemas"]["ProblemDetailsSchema"];
                 };
             };
-            /** @description No such server group or application */
+            /** @description No such server group or machine */
             404: {
                 headers: {
                     [name: string]: unknown;

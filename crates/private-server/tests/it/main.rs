@@ -20,7 +20,7 @@ mod group_card_version;
 mod health;
 mod healthchecks;
 mod inventory;
-mod inventory_secrets;
+mod inventory_variables;
 mod issues;
 mod maintenance_targets;
 mod mcp;

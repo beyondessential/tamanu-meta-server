@@ -5,7 +5,9 @@ import {
 	Alert,
 	Box,
 	Button,
+	Checkbox,
 	Chip,
+	FormControlLabel,
 	IconButton,
 	LinearProgress,
 	MenuItem,
@@ -19,36 +21,51 @@ import { useState } from "react";
 import { useApi, useApiAction } from "../api";
 import { useIsAdmin } from "../hooks/useIsAdmin";
 import type {
-	InventorySecretVariable,
+	InventoryLease,
+	InventoryVariable,
 	MaintenanceWindow,
 	ServerRank,
 } from "../types";
 import { SERVER_RANK_ORDER } from "../types";
-import ApplicationTypeChip from "./ApplicationTypeChip";
 import DeclareMaintenanceDialog from "./DeclareMaintenanceDialog";
 import TimeAgo from "./TimeAgo";
 
+type Machine = { id: string; name?: string | null };
+
 /// What a configuration run receives for each of this group's environments:
-/// the applications it would act on, the address each is reached at, and the
-/// variables that configure them, with the environment's values shown once
-/// rather than repeated under every application.
-///
-/// A secret variable appears by name and never by value, and the assembled
-/// inventory is admin-only, carrying those values.
+/// the machines it acts on, and the variables that configure them, with a
+/// value inherited from a wider scope told apart from one the machine sets
+/// itself. A secret appears by name and never by value.
 // spec: INV#presentation
 export default function GroupInventorySection({
 	groupId,
+	groupName,
 	applications,
+	machines,
 	maintenanceTick,
 	onMaintenanceChange,
 }: {
 	groupId: string;
-	applications: ReadonlyArray<{ rank?: ServerRank | null }>;
+	groupName: string;
+	applications: ReadonlyArray<{
+		machine_id: string;
+		rank?: ServerRank | null;
+	}>;
+	machines: ReadonlyArray<Machine>;
 	/// Bumped when a window over the group is declared or lifted anywhere on
-	/// the page, since that changes what a run here would be served.
+	/// the page, since that changes whether a run here could take the lease.
 	maintenanceTick: number;
 	onMaintenanceChange: () => void;
 }) {
+	const [tick, setTick] = useState(0);
+	const reload = () => setTick((n) => n + 1);
+	const variables = useApi(
+		"inventory_variables",
+		"for_group",
+		{ server_group_id: groupId },
+		[groupId, tick],
+	);
+
 	// Rank is an application's, so a group's environments are the ranks its
 	// applications sit at, and one carrying no rank sits at the default.
 	const ranks = SERVER_RANK_ORDER.filter((rank) =>
@@ -60,6 +77,10 @@ export default function GroupInventorySection({
 			<Typography variant="h6" gutterBottom>
 				Inventory
 			</Typography>
+			{variables.status === "loading" && <LinearProgress />}
+			{variables.status === "error" && (
+				<Alert severity="warning">{variables.error.message}</Alert>
+			)}
 			{ranks.length === 0 ? (
 				<Paper variant="outlined" sx={{ p: 2 }}>
 					<Typography variant="body2" color="text.secondary">
@@ -72,7 +93,19 @@ export default function GroupInventorySection({
 						<EnvironmentInventory
 							key={rank}
 							groupId={groupId}
+							groupName={groupName}
 							rank={rank}
+							machines={machines.filter((machine) =>
+								applications.some(
+									(application) =>
+										application.machine_id === machine.id &&
+										(application.rank ?? "dev") === rank,
+								),
+							)}
+							variables={
+								variables.status === "ok" ? variables.data : []
+							}
+							onChanged={reload}
 							maintenanceTick={maintenanceTick}
 							onMaintenanceChange={onMaintenanceChange}
 						/>
@@ -85,41 +118,33 @@ export default function GroupInventorySection({
 
 function EnvironmentInventory({
 	groupId,
+	groupName,
 	rank,
+	machines,
+	variables,
+	onChanged,
 	maintenanceTick,
 	onMaintenanceChange,
 }: {
 	groupId: string;
+	groupName: string;
 	rank: ServerRank;
+	machines: ReadonlyArray<Machine>;
+	variables: ReadonlyArray<InventoryVariable>;
+	onChanged: () => void;
 	maintenanceTick: number;
 	onMaintenanceChange: () => void;
 }) {
 	const isAdmin = useIsAdmin() === true;
-	const [tick, setTick] = useState(0);
-	const reload = () => setTick((n) => n + 1);
 
-	const inventory = useApi(
-		"inventory",
-		"for_group",
-		{ server_group_id: groupId, rank },
-		[groupId, rank, tick],
-		{ skip: !isAdmin },
+	const groupVars = variables.filter(
+		(variable) => variable.server_group_id && !variable.rank,
 	);
-	const secrets = useApi(
-		"inventory_secrets",
-		"for_group",
-		{ server_group_id: groupId },
-		[groupId, tick],
+	const environmentVars = variables.filter(
+		(variable) => variable.rank === rank,
 	);
-
-	const declared = secrets.status === "ok" ? secrets.data : [];
-	const environmentSecrets = declared.filter(
-		(variable) => variable.rank === rank && !variable.application_id,
-	);
-	const applicationSecrets = (applicationId: string) =>
-		declared.filter((variable) => variable.application_id === applicationId);
-
-	const hosts = inventory.status === "ok" ? inventory.data.hosts : [];
+	const machineVars = (machineId: string) =>
+		variables.filter((variable) => variable.machine_id === machineId);
 
 	return (
 		<Paper variant="outlined" sx={{ p: 2 }} data-testid={`environment-${rank}`}>
@@ -131,113 +156,71 @@ function EnvironmentInventory({
 				{rank}
 			</Typography>
 
-			{(inventory.status === "loading" || secrets.status === "loading") && (
-				<LinearProgress />
-			)}
+			<Stack spacing={2} sx={{ mt: 1 }}>
+				<Run
+					groupId={groupId}
+					groupName={groupName}
+					rank={rank}
+					maintenanceTick={maintenanceTick}
+					onDeclared={onMaintenanceChange}
+				/>
 
-			{inventory.status === "error" && (
-				<Alert severity="warning" sx={{ mt: 1 }}>
-					{inventory.error.message}
-				</Alert>
-			)}
-
-			{!isAdmin && (
-				<Alert severity="info" sx={{ mt: 1 }} data-testid="inventory-needs-admin">
-					The assembled inventory carries the environment's secret values, so
-					reading it needs admin access. The names set here are below.
-				</Alert>
-			)}
-
-			{!isAdmin && (
-				<Box sx={{ mt: 2 }}>
-					<Typography variant="body2" color="text.secondary">
-						Secret variables
+				<Box>
+					<Typography variant="body2" color="text.secondary" gutterBottom>
+						Group and environment variables, carried by every machine below
 					</Typography>
-					<Secrets items={environmentSecrets} />
-				</Box>
-			)}
-
-			{isAdmin && inventory.status === "ok" && (
-				<Stack spacing={2} sx={{ mt: 1 }}>
-					<Run
-						groupId={groupId}
-						group={inventory.data.group}
-						rank={rank}
-						maintenanceTick={maintenanceTick}
-						onDeclared={onMaintenanceChange}
+					<Vars
+						items={[...groupVars, ...environmentVars]}
+						scopeOf={(variable) =>
+							variable.rank
+								? { server_group_id: groupId, rank }
+								: { server_group_id: groupId }
+						}
+						onRemove={isAdmin ? onChanged : undefined}
 					/>
+				</Box>
 
-					<Box>
-						<Typography variant="body2" color="text.secondary" gutterBottom>
-							Environment variables, carried by every application below
+				{machines.map((machine) => (
+					<Box key={machine.id} data-testid="inventory-machine">
+						<Typography variant="subtitle2">
+							{machine.name ?? machine.id}
 						</Typography>
 						<Vars
-							vars={inventory.data.vars}
-							secret={inventory.data.secret_vars}
-						/>
-						<Secrets
-							items={environmentSecrets}
-							onRemove={reload}
-							scope={{ server_group_id: groupId, rank }}
+							items={machineVars(machine.id)}
+							inherited={[...groupVars, ...environmentVars]}
+							scopeOf={() => ({ machine_id: machine.id })}
+							onRemove={isAdmin ? onChanged : undefined}
+							empty="Sets nothing of its own"
 						/>
 					</Box>
+				))}
 
-					{hosts.map((host) => (
-						<Box key={host.id} data-testid="inventory-application">
-							<Stack
-								direction="row"
-								spacing={1}
-								sx={{ alignItems: "baseline", flexWrap: "wrap" }}
-							>
-								<Typography variant="subtitle2">{host.name}</Typography>
-								<ApplicationTypeChip type={host.type} />
-								<Typography
-									variant="body2"
-									color="text.secondary"
-									sx={{ fontFamily: "monospace" }}
-								>
-									{host.address ?? "no address"}
-								</Typography>
-							</Stack>
-							<Vars
-								vars={host.own_vars}
-								overrides={inventory.data.vars}
-								secret={host.secret_vars}
-								empty="Sets nothing of its own"
-							/>
-							<Secrets
-								items={applicationSecrets(host.id)}
-								onRemove={reload}
-								scope={{ application_id: host.id }}
-							/>
-						</Box>
-					))}
-
-					<SetSecret
+				{isAdmin && (
+					<SetVariable
 						groupId={groupId}
 						rank={rank}
-						hosts={hosts}
-						onSet={reload}
+						machines={machines}
+						onSet={onChanged}
 					/>
-				</Stack>
-			)}
+				)}
+			</Stack>
 		</Paper>
 	);
 }
 
 /// The invocation a run on this environment is started with, filled in with
-/// canopy's address and the environment's identity, and the declaration that
-/// makes the environment the operator's to run on.
+/// canopy's address and the environment's identity, and the lease and window
+/// state that says whether a run would be served.
 // spec: INV#presentation
 function Run({
 	groupId,
-	group,
+	groupName,
 	rank,
 	maintenanceTick,
 	onDeclared,
 }: {
 	groupId: string;
-	group: string;
+	groupName: string;
 	rank: ServerRank;
 	maintenanceTick: number;
 	onDeclared: () => void;
@@ -250,17 +233,23 @@ function Run({
 		{ server_group_id: groupId },
 		[groupId, maintenanceTick],
 	);
+	const lease = useApi(
+		"inventory",
+		"lease_for_group",
+		{ server_group_id: groupId, rank },
+		[groupId, rank, maintenanceTick],
+	);
 
-	// The inventory is refused while a window someone else declared holds, so
-	// one holding here is the operator's own.
 	const declared =
 		windows.status === "ok"
 			? ((windows.data as MaintenanceWindow[]).find(
 					(held) => held.ended_at === null,
 				) ?? null)
 			: null;
+	const held: InventoryLease | null =
+		lease.status === "ok" ? lease.data : null;
 
-	const command = `CANOPY_URL=${window.location.origin} CANOPY_GROUP=${shellArg(group)} CANOPY_RANK=${rank} ansible-playbook -i inventory/canopy.yml <playbook>`;
+	const command = `CANOPY_URL=${window.location.origin} CANOPY_GROUP=${shellArg(groupName)} CANOPY_RANK=${rank} ansible-playbook -i inventory/canopy.yml <playbook>`;
 
 	const copy = async () => {
 		try {
@@ -301,6 +290,18 @@ function Run({
 			>
 				{command}
 			</Box>
+			{held && (
+				<Typography
+					variant="caption"
+					color="text.secondary"
+					sx={{ display: "block", mt: 1 }}
+					data-testid="run-leased"
+				>
+					{held.held_by ?? "An operator"} is running here, until{" "}
+					<TimeAgo timestamp={held.expires_at} />
+					{held.note ? `: ${held.note}` : ""}
+				</Typography>
+			)}
 			{declared ? (
 				<Typography
 					variant="caption"
@@ -308,9 +309,9 @@ function Run({
 					sx={{ display: "block", mt: 1 }}
 					data-testid="run-declared"
 				>
-					Your work is declared, ending{" "}
-					<TimeAgo timestamp={declared.expected_end} />, so this inventory is
-					served to your run and refused to anyone else's.
+					Work is declared here, ending{" "}
+					<TimeAgo timestamp={declared.expected_end} />, so only{" "}
+					{declared.declared_by ?? "whoever declared it"} can take the lease.
 				</Typography>
 			) : (
 				<Stack spacing={0.5} sx={{ mt: 1, alignItems: "flex-start" }}>
@@ -324,8 +325,8 @@ function Run({
 						Declare the work
 					</Button>
 					<Typography variant="caption" color="text.secondary">
-						Declare it before running, and the inventory is refused to a second
-						operator until you lift it.
+						Declare it before running, and no one else can take the lease until
+						you lift it.
 					</Typography>
 				</Stack>
 			)}
@@ -334,7 +335,7 @@ function Run({
 				onClose={() => setDialogOpen(false)}
 				scope="group"
 				id={groupId}
-				targetLabel={group}
+				targetLabel={groupName}
 				prefill={{ note: `configuring ${rank}` }}
 				onDone={onDeclared}
 			/>
@@ -348,77 +349,33 @@ function shellArg(value: string): string {
 	return `'${value.replace(/'/g, "'\\''")}'`;
 }
 
-/// Variables as chips. Where a set of environment values is passed, a key
-/// present in both is marked as overriding rather than adding, since that is
-/// the case an operator chasing a value that isn't taking effect is looking
-/// for. A secret's value is never among them.
+/// Variables as chips. A secret shows its name and never its value. Where a
+/// set of wider-scope variables is passed, a name present in both is marked as
+/// overriding rather than adding, since that is the case an operator chasing a
+/// value that isn't taking effect is looking for.
 function Vars({
-	vars,
-	overrides,
-	secret = [],
+	items,
+	inherited = [],
+	scopeOf,
+	onRemove,
 	empty = "None set",
 }: {
-	vars: Record<string, unknown>;
-	overrides?: Record<string, unknown>;
-	secret?: ReadonlyArray<string>;
+	items: ReadonlyArray<InventoryVariable>;
+	inherited?: ReadonlyArray<InventoryVariable>;
+	scopeOf: (variable: InventoryVariable) => Record<string, unknown>;
+	onRemove?: () => void;
 	empty?: string;
 }) {
-	const hidden = new Set(secret);
-	const keys = Object.keys(vars)
-		.filter((key) => !hidden.has(key))
-		.sort();
-	if (keys.length === 0) {
+	const remove = useApiAction("inventory_variables", "remove");
+	const wider = new Set(inherited.map((variable) => variable.name));
+
+	if (items.length === 0) {
 		return (
 			<Typography variant="body2" color="text.secondary">
 				{empty}
 			</Typography>
 		);
 	}
-	return (
-		<Stack
-			direction="row"
-			spacing={0.5}
-			useFlexGap
-			sx={{ flexWrap: "wrap", mt: 0.5 }}
-		>
-			{keys.map((key) => {
-				const overriding =
-					overrides !== undefined && key in overrides && !hidden.has(key);
-				const chip = (
-					<Chip
-						key={key}
-						size="small"
-						variant={overriding ? "filled" : "outlined"}
-						label={`${key} = ${format(vars[key])}`}
-						data-testid={overriding ? "overriding-var" : "var"}
-						sx={{ fontFamily: "monospace", maxWidth: "100%" }}
-					/>
-				);
-				return overriding ? (
-					<Tooltip key={key} title="Overrides the environment's value">
-						{chip}
-					</Tooltip>
-				) : (
-					chip
-				);
-			})}
-		</Stack>
-	);
-}
-
-/// Secret variables by name, with where each is set and when it last changed.
-/// Never a value: what a run receives is served to the run.
-function Secrets({
-	items,
-	scope,
-	onRemove,
-}: {
-	items: ReadonlyArray<InventorySecretVariable>;
-	scope?: Record<string, unknown>;
-	onRemove?: () => void;
-}) {
-	const remove = useApiAction("inventory_secrets", "remove");
-	if (items.length === 0) return null;
 
 	return (
 		<>
@@ -428,41 +385,62 @@ function Secrets({
 				useFlexGap
 				sx={{ flexWrap: "wrap", mt: 0.5 }}
 			>
-			{items.map((variable) => (
-				<Tooltip
-					key={variable.id}
-					title={`Set by ${variable.set_by ?? "unknown"}, ${new Date(
-						variable.updated_at,
-					).toLocaleString()}`}
-				>
-					<Chip
-						size="small"
-						variant="outlined"
-						color="warning"
-						label={`${variable.name} = secret`}
-						data-testid="secret-var"
-						sx={{ fontFamily: "monospace", maxWidth: "100%" }}
-						onDelete={
-							scope && onRemove
-								? () => {
-										remove
-											.call({ ...scope, name: variable.name })
-											.then(onRemove)
-											.catch(() => {
-												// Surfaced by the alert below.
-											});
-									}
-								: undefined
-						}
-						deleteIcon={
-							<DeleteIcon
-								data-testid={`remove-${variable.name}`}
-								titleAccess={`remove ${variable.name}`}
+				{[...items]
+					.sort((a, b) => a.name.localeCompare(b.name))
+					.map((variable) => {
+						const overriding = wider.has(variable.name);
+						const chip = (
+							<Chip
+								size="small"
+								variant={overriding ? "filled" : "outlined"}
+								color={variable.is_secret ? "warning" : "default"}
+								label={`${variable.name} = ${
+									variable.is_secret ? "secret" : format(variable.value)
+								}`}
+								data-testid={
+									variable.is_secret
+										? "secret-var"
+										: overriding
+											? "overriding-var"
+											: "var"
+								}
+								sx={{ fontFamily: "monospace", maxWidth: "100%" }}
+								onDelete={
+									onRemove
+										? () => {
+												remove
+													.call({
+														...scopeOf(variable),
+														name: variable.name,
+													})
+													.then(onRemove)
+													.catch(() => {
+														// Surfaced by the alert below.
+													});
+											}
+										: undefined
+								}
+								deleteIcon={
+									<DeleteIcon
+										data-testid={`remove-${variable.name}`}
+										titleAccess={`remove ${variable.name}`}
+									/>
+								}
 							/>
-						}
-					/>
-				</Tooltip>
-			))}
+						);
+						return (
+							<Tooltip
+								key={variable.id}
+								title={`Set by ${variable.set_by ?? "unknown"}, ${new Date(
+									variable.updated_at,
+								).toLocaleString()}${
+									overriding ? "; overrides a wider scope" : ""
+								}`}
+							>
+								{chip}
+							</Tooltip>
+						);
+					})}
 			</Stack>
 			{remove.error && (
 				<Alert severity="warning" sx={{ mt: 1 }}>
@@ -473,31 +451,36 @@ function Secrets({
 	);
 }
 
+const GROUP = "group";
 const ENVIRONMENT = "environment";
 
-function SetSecret({
+function SetVariable({
 	groupId,
 	rank,
-	hosts,
+	machines,
 	onSet,
 }: {
 	groupId: string;
 	rank: ServerRank;
-	hosts: ReadonlyArray<{ id: string; name: string }>;
+	machines: ReadonlyArray<Machine>;
 	onSet: () => void;
 }) {
 	const [where, setWhere] = useState<string>(ENVIRONMENT);
 	const [name, setName] = useState("");
 	const [value, setValue] = useState("");
-	const set = useApiAction("inventory_secrets", "set");
+	const [secret, setSecret] = useState(false);
+	const set = useApiAction("inventory_variables", "set");
+
+	const scope =
+		where === GROUP
+			? { server_group_id: groupId }
+			: where === ENVIRONMENT
+				? { server_group_id: groupId, rank }
+				: { machine_id: where };
 
 	const submit = () => {
-		const scope =
-			where === ENVIRONMENT
-				? { server_group_id: groupId, rank }
-				: { application_id: where };
 		set
-			.call({ ...scope, name: name.trim(), value })
+			.call({ ...scope, name: name.trim(), value: parse(value), secret })
 			.then(() => {
 				setName("");
 				setValue("");
@@ -507,9 +490,9 @@ function SetSecret({
 	};
 
 	return (
-		<Box data-testid="set-secret">
+		<Box data-testid="set-variable">
 			<Typography variant="body2" color="text.secondary" gutterBottom>
-				Set a secret variable
+				Set a variable
 			</Typography>
 			<Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: "wrap" }}>
 				<TextField
@@ -520,10 +503,11 @@ function SetSecret({
 					onChange={(event) => setWhere(event.target.value)}
 					sx={{ minWidth: 180 }}
 				>
-					<MenuItem value={ENVIRONMENT}>Whole environment</MenuItem>
-					{hosts.map((host) => (
-						<MenuItem key={host.id} value={host.id}>
-							{host.name}
+					<MenuItem value={GROUP}>Whole group</MenuItem>
+					<MenuItem value={ENVIRONMENT}>This environment</MenuItem>
+					{machines.map((machine) => (
+						<MenuItem key={machine.id} value={machine.id}>
+							{machine.name ?? machine.id}
 						</MenuItem>
 					))}
 				</TextField>
@@ -536,9 +520,20 @@ function SetSecret({
 				<TextField
 					size="small"
 					label="Value"
-					type="password"
+					type={secret ? "password" : "text"}
 					value={value}
 					onChange={(event) => setValue(event.target.value)}
+				/>
+				<FormControlLabel
+					control={
+						<Checkbox
+							size="small"
+							checked={secret}
+							onChange={(event) => setSecret(event.target.checked)}
+							data-testid="value-is-secret"
+						/>
+					}
+					label="Secret"
 				/>
 				<Button
 					variant="outlined"
@@ -555,6 +550,17 @@ function SetSecret({
 			)}
 		</Box>
 	);
+}
+
+/// A typed value is JSON where it parses as something other than a bare string,
+/// so `true`, `3` and `["a"]` land as themselves and everything else as text.
+function parse(value: string): unknown {
+	try {
+		const parsed = JSON.parse(value);
+		return typeof parsed === "string" ? value : parsed;
+	} catch {
+		return value;
+	}
 }
 
 function format(value: unknown): string {

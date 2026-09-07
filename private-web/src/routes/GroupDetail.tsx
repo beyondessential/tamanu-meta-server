@@ -249,7 +249,9 @@ export default function GroupDetail() {
 
 			<GroupInventorySection
 				groupId={group.id}
+				groupName={group.name}
 				applications={applications}
+				machines={machines}
 				maintenanceTick={maintenanceTick}
 				onMaintenanceChange={() => setMaintenanceTick((n) => n + 1)}
 			/>

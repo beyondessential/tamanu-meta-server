@@ -3,7 +3,8 @@
 //! Canopy owns every repo passphrase with no human copy, so it periodically
 //! snapshots its recovery-critical state — server groups, backup configs with their
 //! per-group passphrase keysets + repo coordinates, schedules, capabilities, the
-//! server list, and the inventory secret variables — and writes it, **`age`-encrypted to recipient public keys
+//! server list, and every inventory variable — and writes it, **`age`-encrypted to
+//! recipient public keys
 //! Canopy never holds the private half of** ([`commons_servers::recovery_vault`]), to a
 //! **versioned, object-locked** S3 bucket. Canopy can write the vault but cannot
 //! read it back: a full Canopy compromise can't disclose the historical secrets,
@@ -13,17 +14,14 @@
 //! refuses to start without them (see the `backups` bin). The blob is written to
 //! the same key each tick; bucket versioning keeps the history.
 
-use std::{
-	collections::{BTreeMap, BTreeSet},
-	time::Duration,
-};
+use std::{collections::BTreeMap, time::Duration};
 
 use anyhow::{Context, Result};
 use commons_servers::{backup_secrets::BackupSecrets, recovery_vault::Recipients};
 use database::{
 	MachineBackupCapability, ServerGroupBackupConfig, ServerGroupBackupSchedule,
 	applications::Application,
-	inventory_secret_variables::{InventorySecretVariable, SecretScope},
+	inventory_variables::{InventoryVariable, VariableScope},
 	server_groups::ServerGroup,
 };
 use jiff::Timestamp;
@@ -96,16 +94,18 @@ struct RecoverySnapshot {
 	groups: Vec<RecoveryGroup>,
 	applications: Vec<Application>,
 	enabled_capabilities: Vec<MachineBackupCapability>,
-	inventory_secrets: Vec<RecoveryInventorySecrets>,
+	inventory_variables: Vec<RecoveryInventoryVariables>,
 }
 
-/// One scope's secret variables: the Secret they live under and its keyset,
-/// name to value. Empty (logged) if the Secret can't be read.
+/// One scope's variables: the plain values as stored, and the secret ones read
+/// out of the Secret they live under. Secrets empty (logged) if it can't be
+/// read.
 #[derive(Serialize)]
-struct RecoveryInventorySecrets {
+struct RecoveryInventoryVariables {
 	#[serde(flatten)]
-	scope: SecretScope,
+	scope: VariableScope,
 	secret: String,
+	values: BTreeMap<String, serde_json::Value>,
 	keys: BTreeMap<String, String>,
 }
 
@@ -127,9 +127,9 @@ struct RecoveryConfig {
 }
 
 /// Gather the recovery-critical state and serialise it to JSON bytes (plaintext, before
-/// encryption). Reads the passphrase keyset per group and the secret variables
-/// per scope; a missing/unreadable Secret is logged and left empty rather than
-/// failing the whole snapshot.
+/// encryption). Reads the passphrase keyset per group and the secret values per
+/// variable scope; a missing/unreadable Secret is logged and left empty rather
+/// than failing the whole snapshot.
 pub async fn build_snapshot_json(
 	db: &mut database::diesel_async::AsyncPgConnection,
 	secrets: &BackupSecrets,
@@ -181,25 +181,38 @@ pub async fn build_snapshot_json(
 			.context("list ungrouped applications")?,
 	);
 
-	let scopes: BTreeSet<SecretScope> = InventorySecretVariable::list_all(db)
+	let mut by_scope: BTreeMap<VariableScope, BTreeMap<String, Option<serde_json::Value>>> =
+		BTreeMap::new();
+	for variable in InventoryVariable::list_all(db)
 		.await
-		.context("list secret variables")?
-		.iter()
-		.map(InventorySecretVariable::scope)
-		.collect();
-	let mut inventory_secrets = Vec::with_capacity(scopes.len());
-	for scope in scopes {
+		.context("list inventory variables")?
+	{
+		by_scope
+			.entry(variable.scope())
+			.or_default()
+			.insert(variable.name.clone(), variable.value.clone());
+	}
+	let mut inventory_variables = Vec::with_capacity(by_scope.len());
+	for (scope, variables) in by_scope {
 		let secret = scope.secret_name();
-		let keys = match secrets.read_keys(&secret).await {
-			Ok(keys) => keys,
-			Err(e) => {
-				warn!(%secret, "recovery-snapshot: secret variables unreadable ({e}); storing empty");
-				BTreeMap::new()
+		let keys = if variables.values().any(Option::is_none) {
+			match secrets.read_keys(&secret).await {
+				Ok(keys) => keys,
+				Err(e) => {
+					warn!(%secret, "recovery-snapshot: secret variables unreadable ({e}); storing empty");
+					BTreeMap::new()
+				}
 			}
+		} else {
+			BTreeMap::new()
 		};
-		inventory_secrets.push(RecoveryInventorySecrets {
+		inventory_variables.push(RecoveryInventoryVariables {
 			scope,
 			secret,
+			values: variables
+				.into_iter()
+				.filter_map(|(name, value)| value.map(|value| (name, value)))
+				.collect(),
 			keys,
 		});
 	}
@@ -212,7 +225,7 @@ pub async fn build_snapshot_json(
 		enabled_capabilities: MachineBackupCapability::list_enabled(db)
 			.await
 			.context("list capabilities")?,
-		inventory_secrets,
+		inventory_variables,
 	};
 	serde_json::to_vec(&snapshot).context("serialise snapshot")
 }
@@ -344,23 +357,25 @@ mod tests {
 	}
 
 	#[tokio::test(flavor = "multi_thread")]
-	async fn snapshot_includes_inventory_secrets() {
+	async fn snapshot_includes_inventory_variables() {
 		TestDb::run(|mut conn, _url| async move {
 			let group_id = uuid::Uuid::new_v4();
 			conn.batch_execute(&format!(
 				"INSERT INTO server_groups (id, name) VALUES ('{group_id}', 'g');
-				 INSERT INTO inventory_secret_variables (server_group_id, rank, name)
-				 VALUES ('{group_id}', 'production', 'salt');"
+				 INSERT INTO inventory_variables (server_group_id, rank, name, is_secret)
+				 VALUES ('{group_id}', 'production', 'salt', TRUE);
+				 INSERT INTO inventory_variables (server_group_id, rank, name, value, is_secret)
+				 VALUES ('{group_id}', 'production', 'timezone', '\"Pacific/Fiji\"', FALSE);"
 			))
 			.await
 			.unwrap();
 
 			let secrets = BackupSecrets::memory();
-			let secret = format!("inventory-vars-{group_id}-production");
+			let secret = format!("inventory-vars-env-{group_id}-production");
 			secrets
 				.put_keys(
 					&secret,
-					&BTreeMap::from([("salt".to_string(), "pepper".to_string())]),
+					&BTreeMap::from([("salt".to_string(), "\"pepper\"".to_string())]),
 				)
 				.await
 				.unwrap();
@@ -370,11 +385,12 @@ mod tests {
 				.unwrap();
 			let value: serde_json::Value = serde_json::from_slice(&json).unwrap();
 
-			let entry = &value["inventory_secrets"][0];
+			let entry = &value["inventory_variables"][0];
 			assert_eq!(entry["group_id"], group_id.to_string());
 			assert_eq!(entry["rank"], "production");
 			assert_eq!(entry["secret"], secret);
-			assert_eq!(entry["keys"]["salt"], "pepper");
+			assert_eq!(entry["keys"]["salt"], "\"pepper\"");
+			assert_eq!(entry["values"]["timezone"], "Pacific/Fiji");
 		})
 		.await;
 	}

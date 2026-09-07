@@ -1,6 +1,6 @@
-//! Endpoint tests for `/api/inventory/for_group` — what a configuration run
-//! reads for one environment, and the refusals it has to tell apart from
-//! Canopy being unreachable.
+//! Endpoint tests for the environment inventory: the lease a run holds while
+//! it runs, what it reads for one environment, and the refusals it has to be
+//! told apart from Canopy being unreachable.
 //!
 //! spec: INV
 
@@ -8,10 +8,13 @@ use commons_tests::diesel_async::{AsyncPgConnection, SimpleAsyncConnection};
 use serde_json::{Value, json};
 use uuid::Uuid;
 
-pub(crate) async fn insert_group(conn: &mut AsyncPgConnection, name: &str, tags: Value) -> Uuid {
+/// The login every test request authenticates as.
+pub(crate) const ME: &str = "admin@localhost";
+
+pub(crate) async fn insert_group(conn: &mut AsyncPgConnection, name: &str) -> Uuid {
 	let id = Uuid::new_v4();
 	conn.batch_execute(&format!(
-		"INSERT INTO server_groups (id, name, tags) VALUES ('{id}', '{name}', '{tags}')"
+		"INSERT INTO server_groups (id, name) VALUES ('{id}', '{name}')"
 	))
 	.await
 	.expect("insert group");
@@ -24,9 +27,8 @@ pub(crate) async fn insert_application(
 	name: &str,
 	r#type: &str,
 	host: Option<&str>,
-	tags: Value,
 ) -> Uuid {
-	insert_ranked_application(conn, group, name, r#type, None, host, tags).await
+	insert_ranked_application(conn, group, name, r#type, None, host).await
 }
 
 /// An application on a machine of its own, in a group. Seeded directly: a type
@@ -38,8 +40,23 @@ pub(crate) async fn insert_ranked_application(
 	r#type: &str,
 	rank: Option<&str>,
 	host: Option<&str>,
-	tags: Value,
 ) -> Uuid {
+	insert_application_on_its_own_machine(conn, group, name, r#type, rank, host)
+		.await
+		.0
+}
+
+/// An application on a machine of its own, in a group, answering both
+/// identifiers. Seeded directly: a type is reported rather than entered, so no
+/// operator flow creates one.
+pub(crate) async fn insert_application_on_its_own_machine(
+	conn: &mut AsyncPgConnection,
+	group: Uuid,
+	name: &str,
+	r#type: &str,
+	rank: Option<&str>,
+	host: Option<&str>,
+) -> (Uuid, Uuid) {
 	let id = Uuid::new_v4();
 	let machine = Uuid::new_v4();
 	let ty = r#type;
@@ -47,12 +64,12 @@ pub(crate) async fn insert_ranked_application(
 	let rank = rank.map_or("NULL".to_string(), |r| format!("'{r}'"));
 	conn.batch_execute(&format!(
 		"INSERT INTO machines (id, name, group_id) VALUES ('{machine}', '{name}', '{group}');
-		 INSERT INTO applications (id, name, type, rank, host, group_id, machine_id, tags)
-		 VALUES ('{id}', '{name}', '{ty}', {rank}, {host}, '{group}', '{machine}', '{tags}')"
+		 INSERT INTO applications (id, name, type, rank, host, group_id, machine_id)
+		 VALUES ('{id}', '{name}', '{ty}', {rank}, {host}, '{group}', '{machine}')"
 	))
 	.await
 	.expect("insert application");
-	id
+	(id, machine)
 }
 
 /// The identity speaks for the box, so the device binds to the machine the
@@ -73,31 +90,45 @@ pub(crate) async fn bind_device(
 	.expect("bind device");
 }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn serves_an_environments_applications_and_variables() {
-	commons_tests::server::run(async move |mut conn, _public, private| {
-		let group = insert_group(
-			&mut conn,
-			"kamaka-prod",
-			json!({
-				"timezone": "Pacific/Auckland",
-				"tamanu_version": "v2.54.8",
-				"elastic_agent_enabled": "false",
-			}),
-		)
+/// Take the lease and answer its identifier, which the inventory read needs.
+pub(crate) async fn take_lease(
+	private: &commons_tests::axum_test::TestServer,
+	args: Value,
+) -> Uuid {
+	let response = private.post("/api/inventory/take_lease").json(&args).await;
+	response.assert_status_ok();
+	let body: Value = response.json();
+	body["id"]
+		.as_str()
+		.expect("lease id")
+		.parse()
+		.expect("lease id is a uuid")
+}
+
+/// Take the lease and read the inventory under it, the whole flow a run makes.
+pub(crate) async fn read_inventory(
+	private: &commons_tests::axum_test::TestServer,
+	args: Value,
+) -> Value {
+	let lease = take_lease(private, args).await;
+	let response = private
+		.post("/api/inventory/for_group")
+		.json(&json!({ "lease_id": lease }))
 		.await;
+	response.assert_status_ok();
+	response.json()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn serves_an_environments_machines_and_applications() {
+	commons_tests::server::run(async move |mut conn, _public, private| {
+		let group = insert_group(&mut conn, "kamaka-prod").await;
 		let central = insert_application(
 			&mut conn,
 			group,
 			"kamaka-prod-central",
 			"tamanu-central",
 			None,
-			json!({
-				"public_hostname": "central.kamaka.example",
-				"elastic_agent_enabled": "true",
-				"tamanu_caddy_extra_hostnames": "[\"sync.kamaka.example\"]",
-				"ansible_port": "2222",
-			}),
 		)
 		.await;
 		bind_device(&mut conn, central, "kamaka-prod-central").await;
@@ -107,61 +138,39 @@ async fn serves_an_environments_applications_and_variables() {
 			"kamaka-prod-facility",
 			"tamanu-facility",
 			Some("https://facility.kamaka.example/"),
-			json!({ "canopy:type": "spoofed" }),
 		)
 		.await;
 
-		let response = private
-			.post("/api/inventory/for_group")
-			.json(&json!({ "group": "kamaka-prod" }))
-			.await;
-		response.assert_status_ok();
-		let body: Value = response.json();
+		let body = read_inventory(&private, json!({ "group": "kamaka-prod" })).await;
 
 		assert_eq!(body["group"], "kamaka-prod");
 		// Nothing here carries a rank, so the whole group is one environment at
 		// the default rank.
 		assert_eq!(body["rank"], "dev");
-		assert_eq!(body["vars"]["timezone"], "Pacific/Auckland");
-		assert_eq!(body["vars"]["elastic_agent_enabled"], json!(false));
 
 		let hosts = body["hosts"].as_array().expect("hosts");
 		assert_eq!(hosts.len(), 2);
 
-		// A bound device's tailnet name is the address, and the group's values
-		// carry down except where the application sets its own.
+		// A bound device's tailnet name is the address, and the machine carries
+		// the applications a run configures on it.
 		assert_eq!(hosts[0]["name"], "kamaka-prod-central");
-		assert_eq!(hosts[0]["type"], "tamanu-central");
 		assert_eq!(hosts[0]["address"], "kamaka-prod-central");
-		assert_eq!(hosts[0]["vars"]["timezone"], "Pacific/Auckland");
-		assert_eq!(hosts[0]["vars"]["elastic_agent_enabled"], json!(true));
-		assert_eq!(
-			hosts[0]["vars"]["tamanu_caddy_extra_hostnames"],
-			json!(["sync.kamaka.example"])
-		);
-		assert_eq!(hosts[0]["vars"]["ansible_port"], "2222");
+		assert_eq!(hosts[0]["applications"][0]["type"], "tamanu-central");
+		assert_eq!(hosts[0]["applications"][0]["id"], central.to_string());
 
-		// What the application sets itself is served apart from what it
-		// inherits, so a value can be traced to where it is set.
-		assert_eq!(hosts[0]["own_vars"]["elastic_agent_enabled"], json!(true));
-		assert!(hosts[0]["own_vars"].get("timezone").is_none());
-
-		// No device on the box, so the address is the recorded host as a bare
-		// name, and a stored tag in the reserved namespace is not served as a
-		// variable.
+		// No device on the box, so the address is the recorded host of an
+		// application on it, as a bare name.
 		assert_eq!(hosts[1]["address"], "facility.kamaka.example");
-		assert!(hosts[1]["vars"].get("canopy:type").is_none());
-		assert_eq!(hosts[1]["vars"]["timezone"], "Pacific/Auckland");
 	})
 	.await
 }
 
 /// Rank is an application's, so two workloads on one box sit in two
-/// environments and are configured apart.
+/// environments and are configured apart. The box is one machine in each.
 #[tokio::test(flavor = "multi_thread")]
 async fn splits_a_shared_box_by_the_rank_of_each_application() {
 	commons_tests::server::run(async move |mut conn, _public, private| {
-		let group = insert_group(&mut conn, "kamaka-shared", json!({})).await;
+		let group = insert_group(&mut conn, "kamaka-shared").await;
 		let machine = Uuid::new_v4();
 		let device = Uuid::new_v4();
 		let production = Uuid::new_v4();
@@ -178,18 +187,19 @@ async fn splits_a_shared_box_by_the_rank_of_each_application() {
 		.await
 		.expect("seed a shared box");
 
-		let response = private
-			.post("/api/inventory/for_group")
-			.json(&json!({ "server_group_id": group, "rank": "production" }))
-			.await;
-		response.assert_status_ok();
-		let body: Value = response.json();
+		let body = read_inventory(
+			&private,
+			json!({ "server_group_id": group, "rank": "production" }),
+		)
+		.await;
 		let hosts = body["hosts"].as_array().expect("hosts");
 		assert_eq!(hosts.len(), 1);
-		assert_eq!(hosts[0]["name"], "kamaka-central");
-		// Both workloads are reached at the box's address.
+		assert_eq!(hosts[0]["id"], machine.to_string());
 		assert_eq!(hosts[0]["address"], "kamaka-shared-box");
-		assert_eq!(hosts[0]["machine_id"], machine.to_string());
+		// Only the production workload, though both run on this box.
+		let applications = hosts[0]["applications"].as_array().expect("applications");
+		assert_eq!(applications.len(), 1);
+		assert_eq!(applications[0]["id"], production.to_string());
 	})
 	.await
 }
@@ -197,265 +207,92 @@ async fn splits_a_shared_box_by_the_rank_of_each_application() {
 #[tokio::test(flavor = "multi_thread")]
 async fn serves_the_environment_at_the_rank_asked_for() {
 	commons_tests::server::run(async move |mut conn, _public, private| {
-		let group = insert_group(&mut conn, "kamaka", json!({})).await;
+		let group = insert_group(&mut conn, "kamaka").await;
 		insert_ranked_application(
 			&mut conn,
 			group,
-			"kamaka-prod-central",
+			"kamaka-central",
 			"tamanu-central",
 			Some("production"),
 			None,
-			json!({}),
 		)
 		.await;
 		insert_ranked_application(
 			&mut conn,
 			group,
-			"kamaka-demo-central",
+			"kamaka-demo",
 			"tamanu-central",
 			Some("demo"),
 			None,
-			json!({}),
 		)
 		.await;
 
-		// A group spanning two environments cannot be served as one: a run
-		// configuring the demo applications alongside the production ones is
-		// never what was meant.
-		let response = private
-			.post("/api/inventory/for_group")
-			.json(&json!({ "group": "kamaka" }))
-			.await;
-		response.assert_status_conflict();
-
-		let response = private
-			.post("/api/inventory/for_group")
-			.json(&json!({ "group": "kamaka", "rank": "production" }))
-			.await;
-		response.assert_status_ok();
-		let body: Value = response.json();
-		assert_eq!(body["rank"], "production");
+		let body = read_inventory(&private, json!({ "group": "kamaka", "rank": "demo" })).await;
+		assert_eq!(body["rank"], "demo");
 		let hosts = body["hosts"].as_array().expect("hosts");
 		assert_eq!(hosts.len(), 1);
-		assert_eq!(hosts[0]["name"], "kamaka-prod-central");
-
-		// A rank the group holds no live application at is refused, rather than
-		// answered with an empty inventory.
-		let response = private
-			.post("/api/inventory/for_group")
-			.json(&json!({ "group": "kamaka", "rank": "test" }))
-			.await;
-		response.assert_status_conflict();
+		assert_eq!(hosts[0]["name"], "kamaka-demo");
 	})
 	.await
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn serves_an_environment_asked_for_by_identifier() {
+async fn refuses_a_group_holding_several_environments_with_no_rank_named() {
 	commons_tests::server::run(async move |mut conn, _public, private| {
-		let group = insert_group(&mut conn, "drifting-demo", json!({})).await;
-		insert_application(
+		let group = insert_group(&mut conn, "kamaka").await;
+		insert_ranked_application(
 			&mut conn,
 			group,
-			"drifting-demo-central",
+			"kamaka-central",
 			"tamanu-central",
+			Some("production"),
 			None,
-			json!({}),
 		)
 		.await;
-
-		let response = private
-			.post("/api/inventory/for_group")
-			.json(&json!({ "server_group_id": group }))
-			.await;
-		response.assert_status_ok();
-		let body: Value = response.json();
-		assert_eq!(body["group"], "drifting-demo");
-		assert_eq!(body["hosts"].as_array().expect("hosts").len(), 1);
-	})
-	.await
-}
-
-/// The address falls back to the recorded host when the device bound to the box
-/// has no tailnet name of its own.
-#[tokio::test(flavor = "multi_thread")]
-async fn falls_back_to_the_recorded_host_for_a_nameless_device() {
-	commons_tests::server::run(async move |mut conn, _public, private| {
-		let group = insert_group(&mut conn, "kamaka-nameless", json!({})).await;
-		let application = insert_application(
+		insert_ranked_application(
 			&mut conn,
 			group,
-			"kamaka-nameless-central",
+			"kamaka-demo",
 			"tamanu-central",
-			Some("https://central.kamaka.example/"),
-			json!({}),
+			Some("demo"),
+			None,
 		)
 		.await;
-		let device = Uuid::new_v4();
-		conn.batch_execute(&format!(
-			"INSERT INTO devices (id, role) VALUES ('{device}', 'server');
-			 UPDATE machines SET device_id = '{device}'
-			 WHERE id = (SELECT machine_id FROM applications WHERE id = '{application}')"
-		))
-		.await
-		.expect("bind device");
 
 		let response = private
-			.post("/api/inventory/for_group")
-			.json(&json!({ "group": "kamaka-nameless" }))
+			.post("/api/inventory/take_lease")
+			.json(&json!({ "group": "kamaka" }))
 			.await;
-		response.assert_status_ok();
+		response.assert_status(axum::http::StatusCode::CONFLICT);
 		let body: Value = response.json();
-		assert_eq!(body["hosts"][0]["address"], "central.kamaka.example");
+		assert!(
+			body["detail"]
+				.as_str()
+				.expect("detail")
+				.contains("name the rank"),
+			"{body}"
+		);
 	})
 	.await
 }
 
-/// An archived application is not something to configure, so it leaves the
-/// inventory without the group leaving it.
 #[tokio::test(flavor = "multi_thread")]
 async fn leaves_out_an_archived_application() {
 	commons_tests::server::run(async move |mut conn, _public, private| {
-		let group = insert_group(&mut conn, "kamaka-archived", json!({})).await;
-		insert_application(
-			&mut conn,
-			group,
-			"kamaka-archived-central",
-			"tamanu-central",
-			None,
-			json!({}),
-		)
-		.await;
-		let gone = insert_application(
-			&mut conn,
-			group,
-			"kamaka-archived-facility",
-			"tamanu-facility",
-			None,
-			json!({}),
-		)
-		.await;
+		let group = insert_group(&mut conn, "kamaka").await;
+		insert_application(&mut conn, group, "kamaka-central", "tamanu-central", None).await;
+		let gone =
+			insert_application(&mut conn, group, "kamaka-old", "tamanu-facility", None).await;
 		conn.batch_execute(&format!(
-			"UPDATE applications SET deleted_at = now() WHERE id = '{gone}'"
+			"UPDATE applications SET deleted_at = NOW() WHERE id = '{gone}'"
 		))
 		.await
-		.expect("archive application");
+		.expect("archive");
 
-		let response = private
-			.post("/api/inventory/for_group")
-			.json(&json!({ "group": "kamaka-archived" }))
-			.await;
-		response.assert_status_ok();
-		let body: Value = response.json();
+		let body = read_inventory(&private, json!({ "group": "kamaka" })).await;
 		let hosts = body["hosts"].as_array().expect("hosts");
 		assert_eq!(hosts.len(), 1);
-		assert_eq!(hosts[0]["name"], "kamaka-archived-central");
-	})
-	.await
-}
-
-/// An application in no group is in no inventory: it has no group whose tags
-/// would configure it and no environment to belong to.
-#[tokio::test(flavor = "multi_thread")]
-async fn leaves_out_an_application_belonging_to_no_group() {
-	commons_tests::server::run(async move |mut conn, _public, private| {
-		let group = insert_group(&mut conn, "kamaka-lonely", json!({})).await;
-		insert_application(
-			&mut conn,
-			group,
-			"kamaka-lonely-central",
-			"tamanu-central",
-			None,
-			json!({}),
-		)
-		.await;
-		let loose = Uuid::new_v4();
-		conn.batch_execute(&format!(
-			"INSERT INTO machines (id) VALUES ('{loose}');
-			 INSERT INTO applications (id, name, type, machine_id)
-			 VALUES ('{loose}', 'kamaka-loose', 'tamanu-central', '{loose}')"
-		))
-		.await
-		.expect("insert ungrouped application");
-
-		let response = private
-			.post("/api/inventory/for_group")
-			.json(&json!({ "group": "kamaka-lonely" }))
-			.await;
-		response.assert_status_ok();
-		let hosts = response.json::<Value>()["hosts"]
-			.as_array()
-			.expect("hosts")
-			.clone();
-		assert_eq!(hosts.len(), 1);
-		assert_eq!(hosts[0]["name"], "kamaka-lonely-central");
-	})
-	.await
-}
-
-/// Canopy's own placeholder application is not something to configure, and its
-/// recorded host is a loopback address a run would take literally.
-#[tokio::test(flavor = "multi_thread")]
-async fn leaves_out_the_meta_application() {
-	commons_tests::server::run(async move |mut conn, _public, private| {
-		let group = insert_group(&mut conn, "kamaka-meta", json!({})).await;
-		insert_application(
-			&mut conn,
-			group,
-			"kamaka-meta-central",
-			"tamanu-central",
-			None,
-			json!({}),
-		)
-		.await;
-		conn.batch_execute(&format!(
-			"UPDATE applications SET group_id = '{group}' WHERE id = '{}'",
-			Uuid::nil()
-		))
-		.await
-		.expect("group the meta application");
-
-		let response = private
-			.post("/api/inventory/for_group")
-			.json(&json!({ "group": "kamaka-meta" }))
-			.await;
-		response.assert_status_ok();
-		let hosts = response.json::<Value>()["hosts"]
-			.as_array()
-			.expect("hosts")
-			.clone();
-		assert_eq!(hosts.len(), 1);
-		assert_eq!(hosts[0]["name"], "kamaka-meta-central");
-	})
-	.await
-}
-
-/// A tag that opens like JSON and isn't stays the text it was stored as,
-/// rather than becoming an error or a half-parsed value.
-#[tokio::test(flavor = "multi_thread")]
-async fn serves_a_malformed_json_tag_as_text() {
-	commons_tests::server::run(async move |mut conn, _public, private| {
-		let group = insert_group(&mut conn, "kamaka-malformed", json!({})).await;
-		insert_application(
-			&mut conn,
-			group,
-			"kamaka-malformed-central",
-			"tamanu-central",
-			None,
-			json!({ "tamanu_caddy_extra_hostnames": "[\"sync.kamaka.example\"" }),
-		)
-		.await;
-
-		let response = private
-			.post("/api/inventory/for_group")
-			.json(&json!({ "group": "kamaka-malformed" }))
-			.await;
-		response.assert_status_ok();
-		let body: Value = response.json();
-		assert_eq!(
-			body["hosts"][0]["vars"]["tamanu_caddy_extra_hostnames"],
-			"[\"sync.kamaka.example\""
-		);
+		assert_eq!(hosts[0]["name"], "kamaka-central");
 	})
 	.await
 }
@@ -464,10 +301,10 @@ async fn serves_a_malformed_json_tag_as_text() {
 async fn refuses_a_group_canopy_does_not_have() {
 	commons_tests::server::run(async move |_conn, _public, private| {
 		let response = private
-			.post("/api/inventory/for_group")
-			.json(&json!({ "group": "nowhere-prod" }))
+			.post("/api/inventory/take_lease")
+			.json(&json!({ "group": "nowhere" }))
 			.await;
-		response.assert_status_not_found();
+		response.assert_status(axum::http::StatusCode::NOT_FOUND);
 	})
 	.await
 }
@@ -475,27 +312,27 @@ async fn refuses_a_group_canopy_does_not_have() {
 #[tokio::test(flavor = "multi_thread")]
 async fn refuses_an_archived_group() {
 	commons_tests::server::run(async move |mut conn, _public, private| {
-		let group = insert_group(&mut conn, "kamaka-clone", json!({})).await;
-		insert_application(
-			&mut conn,
-			group,
-			"kamaka-clone-central",
-			"tamanu-central",
-			None,
-			json!({}),
-		)
-		.await;
+		let group = insert_group(&mut conn, "kamaka-gone").await;
+		insert_application(&mut conn, group, "kamaka-central", "tamanu-central", None).await;
 		conn.batch_execute(&format!(
-			"UPDATE server_groups SET deleted_at = now() WHERE id = '{group}'"
+			"UPDATE server_groups SET deleted_at = NOW() WHERE id = '{group}'"
 		))
 		.await
-		.expect("archive group");
+		.expect("archive");
 
 		let response = private
-			.post("/api/inventory/for_group")
-			.json(&json!({ "group": "kamaka-clone" }))
+			.post("/api/inventory/take_lease")
+			.json(&json!({ "group": "kamaka-gone" }))
 			.await;
-		response.assert_status_conflict();
+		response.assert_status(axum::http::StatusCode::CONFLICT);
+		let body: Value = response.json();
+		assert!(
+			body["detail"]
+				.as_str()
+				.expect("detail")
+				.contains("archived"),
+			"{body}"
+		);
 	})
 	.await
 }
@@ -503,64 +340,36 @@ async fn refuses_an_archived_group() {
 #[tokio::test(flavor = "multi_thread")]
 async fn refuses_a_group_with_nothing_to_configure() {
 	commons_tests::server::run(async move |mut conn, _public, private| {
-		insert_group(&mut conn, "kamaka-demo", json!({})).await;
-
+		insert_group(&mut conn, "kamaka-empty").await;
 		let response = private
-			.post("/api/inventory/for_group")
-			.json(&json!({ "group": "kamaka-demo" }))
+			.post("/api/inventory/take_lease")
+			.json(&json!({ "group": "kamaka-empty" }))
 			.await;
-		response.assert_status_conflict();
+		response.assert_status(axum::http::StatusCode::CONFLICT);
 	})
 	.await
 }
 
-/// A box added and not yet reporting carries no application, so there is
-/// nothing at that rank to configure and the request is refused rather than
-/// answered with an empty inventory.
-#[tokio::test(flavor = "multi_thread")]
-async fn refuses_a_group_holding_only_a_machine_awaiting_check_in() {
-	commons_tests::server::run(async move |mut conn, _public, private| {
-		let group = insert_group(&mut conn, "kamaka-bare", json!({})).await;
-		let machine = Uuid::new_v4();
-		conn.batch_execute(&format!(
-			"INSERT INTO machines (id, name, group_id)
-			 VALUES ('{machine}', 'kamaka-bare-box', '{group}')"
-		))
-		.await
-		.expect("insert machine");
-
-		let response = private
-			.post("/api/inventory/for_group")
-			.json(&json!({ "server_group_id": group }))
-			.await;
-		response.assert_status_conflict();
-	})
-	.await
-}
-
-/// Names aren't unique, and serving one of two groups that answer to the same
-/// name would configure the wrong fleet.
 #[tokio::test(flavor = "multi_thread")]
 async fn refuses_a_name_that_answers_for_two_groups() {
 	commons_tests::server::run(async move |mut conn, _public, private| {
-		for _ in 0..2 {
-			let group = insert_group(&mut conn, "twice-prod", json!({})).await;
-			insert_application(
-				&mut conn,
-				group,
-				"twice-prod-central",
-				"tamanu-central",
-				None,
-				json!({}),
-			)
-			.await;
-		}
+		let first = insert_group(&mut conn, "kamaka").await;
+		insert_group(&mut conn, "kamaka").await;
+		insert_application(&mut conn, first, "kamaka-central", "tamanu-central", None).await;
 
 		let response = private
-			.post("/api/inventory/for_group")
-			.json(&json!({ "group": "twice-prod" }))
+			.post("/api/inventory/take_lease")
+			.json(&json!({ "group": "kamaka" }))
 			.await;
-		response.assert_status_conflict();
+		response.assert_status(axum::http::StatusCode::CONFLICT);
+		let body: Value = response.json();
+		assert!(
+			body["detail"]
+				.as_str()
+				.expect("detail")
+				.contains("ask by identifier"),
+			"{body}"
+		);
 	})
 	.await
 }
@@ -568,38 +377,205 @@ async fn refuses_a_name_that_answers_for_two_groups() {
 #[tokio::test(flavor = "multi_thread")]
 async fn refuses_a_request_naming_neither_a_group_nor_an_identifier() {
 	commons_tests::server::run(async move |_conn, _public, private| {
-		let response = private
-			.post("/api/inventory/for_group")
+		private
+			.post("/api/inventory/take_lease")
 			.json(&json!({}))
-			.await;
-		response.assert_status_bad_request();
+			.await
+			.assert_status(axum::http::StatusCode::BAD_REQUEST);
 	})
 	.await
 }
 
-/// Both together are as ambiguous as neither: canopy picks nothing.
+// --- leases ---
+
+/// The lease is the interlock: an environment holds one, and a second
+/// operator's run is refused while it holds.
 #[tokio::test(flavor = "multi_thread")]
-async fn refuses_a_request_naming_both_a_group_and_an_identifier() {
+async fn refuses_a_lease_another_operator_holds() {
 	commons_tests::server::run(async move |mut conn, _public, private| {
-		let group = insert_group(&mut conn, "kamaka-both", json!({})).await;
-		insert_application(
-			&mut conn,
-			group,
-			"kamaka-both-central",
-			"tamanu-central",
-			None,
-			json!({}),
-		)
-		.await;
+		let group = insert_group(&mut conn, "kamaka").await;
+		insert_application(&mut conn, group, "kamaka-central", "tamanu-central", None).await;
+		conn.batch_execute(&format!(
+			"INSERT INTO inventory_leases (server_group_id, rank, intent, held_by, note, expires_at)
+			 VALUES ('{group}', 'dev', 'configure', 'someone.else@bes.au', 'rolling the certs',
+			         NOW() + INTERVAL '20 minutes')"
+		))
+		.await
+		.expect("seed a lease");
+
+		let response = private
+			.post("/api/inventory/take_lease")
+			.json(&json!({ "server_group_id": group }))
+			.await;
+		response.assert_status(axum::http::StatusCode::CONFLICT);
+		let detail = response.json::<Value>()["detail"]
+			.as_str()
+			.expect("detail")
+			.to_owned();
+		assert!(detail.contains("someone.else@bes.au"), "{detail}");
+		assert!(detail.contains("rolling the certs"), "{detail}");
+	})
+	.await
+}
+
+/// A run that dies stops holding the environment once its lease expires.
+#[tokio::test(flavor = "multi_thread")]
+async fn takes_a_lease_over_one_that_has_expired() {
+	commons_tests::server::run(async move |mut conn, _public, private| {
+		let group = insert_group(&mut conn, "kamaka").await;
+		insert_application(&mut conn, group, "kamaka-central", "tamanu-central", None).await;
+		conn.batch_execute(&format!(
+			"INSERT INTO inventory_leases (server_group_id, rank, intent, held_by, expires_at)
+			 VALUES ('{group}', 'dev', 'configure', 'someone.else@bes.au',
+			         NOW() - INTERVAL '1 minute')"
+		))
+		.await
+		.expect("seed an expired lease");
+
+		private
+			.post("/api/inventory/take_lease")
+			.json(&json!({ "server_group_id": group }))
+			.await
+			.assert_status_ok();
+	})
+	.await
+}
+
+/// Taking over another operator's lease is deliberate, so it needs asking for.
+#[tokio::test(flavor = "multi_thread")]
+async fn takes_a_lease_over_when_asked_to() {
+	commons_tests::server::run(async move |mut conn, _public, private| {
+		let group = insert_group(&mut conn, "kamaka").await;
+		insert_application(&mut conn, group, "kamaka-central", "tamanu-central", None).await;
+		conn.batch_execute(&format!(
+			"INSERT INTO inventory_leases (server_group_id, rank, intent, held_by, expires_at)
+			 VALUES ('{group}', 'dev', 'configure', 'someone.else@bes.au',
+			         NOW() + INTERVAL '20 minutes')"
+		))
+		.await
+		.expect("seed a lease");
+
+		let response = private
+			.post("/api/inventory/take_lease")
+			.json(&json!({ "server_group_id": group, "take_over": true }))
+			.await;
+		response.assert_status_ok();
+		assert_eq!(response.json::<Value>()["held_by"], ME);
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn refuses_the_inventory_to_someone_who_holds_no_lease() {
+	commons_tests::server::run(async move |mut conn, _public, private| {
+		let group = insert_group(&mut conn, "kamaka").await;
+		insert_application(&mut conn, group, "kamaka-central", "tamanu-central", None).await;
+		let lease = Uuid::new_v4();
+		conn.batch_execute(&format!(
+			"INSERT INTO inventory_leases (id, server_group_id, rank, intent, held_by, expires_at)
+			 VALUES ('{lease}', '{group}', 'dev', 'configure', 'someone.else@bes.au',
+			         NOW() + INTERVAL '20 minutes')"
+		))
+		.await
+		.expect("seed a lease");
+
+		private
+			.post("/api/inventory/for_group")
+			.json(&json!({ "lease_id": lease }))
+			.await
+			.assert_status(axum::http::StatusCode::CONFLICT);
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn refuses_the_inventory_under_an_expired_lease() {
+	commons_tests::server::run(async move |mut conn, _public, private| {
+		let group = insert_group(&mut conn, "kamaka").await;
+		insert_application(&mut conn, group, "kamaka-central", "tamanu-central", None).await;
+		let lease = take_lease(&private, json!({ "server_group_id": group })).await;
+		conn.batch_execute(&format!(
+			"UPDATE inventory_leases SET expires_at = NOW() - INTERVAL '1 minute'
+			 WHERE id = '{lease}'"
+		))
+		.await
+		.expect("expire the lease");
 
 		let response = private
 			.post("/api/inventory/for_group")
-			.json(&json!({ "group": "kamaka-both", "server_group_id": group }))
+			.json(&json!({ "lease_id": lease }))
 			.await;
-		response.assert_status_bad_request();
+		response.assert_status(axum::http::StatusCode::CONFLICT);
+		assert!(
+			response.json::<Value>()["detail"]
+				.as_str()
+				.expect("detail")
+				.contains("expired"),
+		);
 	})
 	.await
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn extending_keeps_the_environment_and_releasing_gives_it_back() {
+	commons_tests::server::run(async move |mut conn, _public, private| {
+		let group = insert_group(&mut conn, "kamaka").await;
+		insert_application(&mut conn, group, "kamaka-central", "tamanu-central", None).await;
+		let lease = take_lease(&private, json!({ "server_group_id": group })).await;
+
+		conn.batch_execute(&format!(
+			"UPDATE inventory_leases SET expires_at = NOW() + INTERVAL '1 minute'
+			 WHERE id = '{lease}'"
+		))
+		.await
+		.expect("bring the expiry in");
+		let extended = private
+			.post("/api/inventory/extend_lease")
+			.json(&json!({ "lease_id": lease }))
+			.await;
+		extended.assert_status_ok();
+
+		private
+			.post("/api/inventory/release_lease")
+			.json(&json!({ "lease_id": lease }))
+			.await
+			.assert_status_ok();
+		// Released, so it is no longer the environment's open lease.
+		private
+			.post("/api/inventory/release_lease")
+			.json(&json!({ "lease_id": lease }))
+			.await
+			.assert_status(axum::http::StatusCode::NOT_FOUND);
+	})
+	.await
+}
+
+/// The group page reads who holds an environment without taking it.
+#[tokio::test(flavor = "multi_thread")]
+async fn reports_the_lease_holding_an_environment() {
+	commons_tests::server::run(async move |mut conn, _public, private| {
+		let group = insert_group(&mut conn, "kamaka").await;
+		insert_application(&mut conn, group, "kamaka-central", "tamanu-central", None).await;
+
+		let before = private
+			.post("/api/inventory/lease_for_group")
+			.json(&json!({ "server_group_id": group, "rank": "dev" }))
+			.await;
+		before.assert_status_ok();
+		assert_eq!(before.json::<Value>(), Value::Null);
+
+		take_lease(&private, json!({ "server_group_id": group })).await;
+		let after = private
+			.post("/api/inventory/lease_for_group")
+			.json(&json!({ "server_group_id": group, "rank": "dev" }))
+			.await;
+		after.assert_status_ok();
+		assert_eq!(after.json::<Value>()["held_by"], ME);
+	})
+	.await
+}
+
+// --- work under way ---
 
 async fn declare_group_window(
 	conn: &mut AsyncPgConnection,
@@ -630,287 +606,139 @@ async fn declare_machine_window(
 	.expect("declare window");
 }
 
-/// A window someone else declared over the group is their work under way: the
-/// run is refused and told who holds it.
 #[tokio::test(flavor = "multi_thread")]
-async fn refuses_under_a_window_someone_else_declared() {
+async fn refuses_a_lease_under_a_window_someone_else_declared() {
 	commons_tests::server::run(async move |mut conn, _public, private| {
-		let group = insert_group(&mut conn, "kamaka-busy", json!({})).await;
-		insert_application(
-			&mut conn,
-			group,
-			"kamaka-busy-central",
-			"tamanu-central",
-			None,
-			json!({}),
-		)
-		.await;
+		let group = insert_group(&mut conn, "kamaka-busy").await;
+		insert_application(&mut conn, group, "kamaka-central", "tamanu-central", None).await;
 		declare_group_window(
 			&mut conn,
 			group,
-			"someone@else",
-			"now() + interval '1 hour'",
+			"someone.else@bes.au",
+			"NOW() + INTERVAL '2 hours'",
 		)
 		.await;
 
 		let response = private
-			.post("/api/inventory/for_group")
-			.json(&json!({ "group": "kamaka-busy" }))
+			.post("/api/inventory/take_lease")
+			.json(&json!({ "server_group_id": group }))
 			.await;
-		response.assert_status_conflict();
-		let detail = response.text();
-		assert!(detail.contains("someone@else"), "{detail}");
+		response.assert_status(axum::http::StatusCode::CONFLICT);
+		let detail = response.json::<Value>()["detail"]
+			.as_str()
+			.expect("detail")
+			.to_owned();
+		assert!(detail.contains("someone.else@bes.au"), "{detail}");
 	})
 	.await
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn serves_under_the_readers_own_window() {
+async fn takes_a_lease_under_the_readers_own_window() {
 	commons_tests::server::run(async move |mut conn, _public, private| {
-		let group = insert_group(&mut conn, "kamaka-mine", json!({})).await;
-		insert_application(
-			&mut conn,
-			group,
-			"kamaka-mine-central",
-			"tamanu-central",
-			None,
-			json!({}),
-		)
-		.await;
-		declare_group_window(
-			&mut conn,
-			group,
-			"admin@localhost",
-			"now() + interval '1 hour'",
-		)
-		.await;
+		let group = insert_group(&mut conn, "kamaka-mine").await;
+		insert_application(&mut conn, group, "kamaka-central", "tamanu-central", None).await;
+		declare_group_window(&mut conn, group, ME, "NOW() + INTERVAL '2 hours'").await;
 
-		let response = private
-			.post("/api/inventory/for_group")
-			.json(&json!({ "group": "kamaka-mine" }))
-			.await;
-		response.assert_status_ok();
+		private
+			.post("/api/inventory/take_lease")
+			.json(&json!({ "server_group_id": group }))
+			.await
+			.assert_status_ok();
 	})
 	.await
 }
 
-/// A run acts on the environment as a whole, so a window over one member
-/// refuses all of it.
+/// A window over one machine refuses the whole environment, a run acting on it
+/// as a whole.
 #[tokio::test(flavor = "multi_thread")]
-async fn refuses_under_a_window_over_a_member() {
+async fn refuses_a_lease_under_a_window_over_one_machine() {
 	commons_tests::server::run(async move |mut conn, _public, private| {
-		let group = insert_group(&mut conn, "kamaka-member", json!({})).await;
-		let central = insert_application(
-			&mut conn,
-			group,
-			"kamaka-member-central",
-			"tamanu-central",
-			None,
-			json!({}),
-		)
-		.await;
-		insert_application(
-			&mut conn,
-			group,
-			"kamaka-member-facility",
-			"tamanu-facility",
-			None,
-			json!({}),
-		)
-		.await;
+		let group = insert_group(&mut conn, "kamaka").await;
+		insert_application(&mut conn, group, "kamaka-central", "tamanu-central", None).await;
+		let facility =
+			insert_application(&mut conn, group, "kamaka-facility", "tamanu-facility", None).await;
 		declare_machine_window(
 			&mut conn,
-			central,
-			"someone@else",
-			"now() + interval '1 hour'",
+			facility,
+			"someone.else@bes.au",
+			"NOW() + INTERVAL '2 hours'",
 		)
 		.await;
 
-		let response = private
-			.post("/api/inventory/for_group")
-			.json(&json!({ "group": "kamaka-member" }))
-			.await;
-		response.assert_status_conflict();
-		assert!(response.text().contains("kamaka-member-central"));
+		private
+			.post("/api/inventory/take_lease")
+			.json(&json!({ "server_group_id": group }))
+			.await
+			.assert_status(axum::http::StatusCode::CONFLICT);
 	})
 	.await
 }
 
+/// A window over a machine none of the environment's applications run on
+/// refuses nothing.
 #[tokio::test(flavor = "multi_thread")]
 async fn ignores_a_window_over_a_machine_at_another_rank() {
 	commons_tests::server::run(async move |mut conn, _public, private| {
-		let group = insert_group(&mut conn, "kamaka-ranks", json!({})).await;
+		let group = insert_group(&mut conn, "kamaka").await;
 		insert_ranked_application(
 			&mut conn,
 			group,
-			"kamaka-prod-central",
+			"kamaka-central",
 			"tamanu-central",
 			Some("production"),
 			None,
-			json!({}),
 		)
 		.await;
 		let demo = insert_ranked_application(
 			&mut conn,
 			group,
-			"kamaka-demo-central",
+			"kamaka-demo",
 			"tamanu-central",
 			Some("demo"),
 			None,
-			json!({}),
 		)
 		.await;
-		declare_machine_window(&mut conn, demo, "someone@else", "now() + interval '1 hour'").await;
+		declare_machine_window(
+			&mut conn,
+			demo,
+			"someone.else@bes.au",
+			"NOW() + INTERVAL '2 hours'",
+		)
+		.await;
 
-		let response = private
-			.post("/api/inventory/for_group")
-			.json(&json!({ "group": "kamaka-ranks", "rank": "production" }))
-			.await;
-		response.assert_status_ok();
+		private
+			.post("/api/inventory/take_lease")
+			.json(&json!({ "server_group_id": group, "rank": "production" }))
+			.await
+			.assert_status_ok();
 	})
 	.await
 }
 
-/// A window past its expected end has stopped holding whether or not the sweep
-/// has stamped it yet.
 #[tokio::test(flavor = "multi_thread")]
-async fn serves_once_a_window_has_passed_its_end() {
+async fn takes_a_lease_once_a_window_has_passed_its_end() {
 	commons_tests::server::run(async move |mut conn, _public, private| {
-		let group = insert_group(&mut conn, "kamaka-done", json!({})).await;
-		insert_application(
-			&mut conn,
-			group,
-			"kamaka-done-central",
-			"tamanu-central",
-			None,
-			json!({}),
-		)
-		.await;
+		let group = insert_group(&mut conn, "kamaka").await;
+		insert_application(&mut conn, group, "kamaka-central", "tamanu-central", None).await;
 		declare_group_window(
 			&mut conn,
 			group,
-			"someone@else",
-			"now() - interval '1 minute'",
+			"someone.else@bes.au",
+			"NOW() - INTERVAL '5 minutes'",
 		)
 		.await;
 
-		let response = private
-			.post("/api/inventory/for_group")
-			.json(&json!({ "group": "kamaka-done" }))
-			.await;
-		response.assert_status_ok();
-	})
-	.await
-}
-
-/// A secret variable someone else set moments ago is their change still under
-/// way, and the refusal names it before any value is read.
-#[tokio::test(flavor = "multi_thread")]
-async fn refuses_after_someone_else_set_a_secret_variable() {
-	commons_tests::server::run(async move |mut conn, _public, private| {
-		let group = insert_group(&mut conn, "kamaka-fresh", json!({})).await;
-		insert_application(
-			&mut conn,
-			group,
-			"kamaka-fresh-central",
-			"tamanu-central",
-			None,
-			json!({}),
-		)
-		.await;
-		conn.batch_execute(&format!(
-			"INSERT INTO inventory_secret_variables (server_group_id, rank, name, set_by)
-			 VALUES ('{group}', 'dev', 'salt', 'someone@else')"
-		))
-		.await
-		.expect("declare secret");
-
-		let response = private
-			.post("/api/inventory/for_group")
-			.json(&json!({ "group": "kamaka-fresh" }))
-			.await;
-		response.assert_status_conflict();
-		let detail = response.text();
-		assert!(
-			detail.contains("salt") && detail.contains("someone@else"),
-			"{detail}"
-		);
-	})
-	.await
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn serves_the_readers_own_fresh_secret_variable() {
-	commons_tests::server::run(async move |mut conn, _public, private| {
-		let group = insert_group(&mut conn, "kamaka-own", json!({})).await;
-		insert_application(
-			&mut conn,
-			group,
-			"kamaka-own-central",
-			"tamanu-central",
-			None,
-			json!({}),
-		)
-		.await;
 		private
-			.post("/api/inventory_secrets/set")
-			.json(&json!({
-				"server_group_id": group,
-				"rank": "dev",
-				"name": "salt",
-				"value": "pepper",
-			}))
+			.post("/api/inventory/take_lease")
+			.json(&json!({ "server_group_id": group }))
 			.await
-			.assert_status_success();
-
-		let response = private
-			.post("/api/inventory/for_group")
-			.json(&json!({ "group": "kamaka-own" }))
-			.await;
-		response.assert_status_ok();
+			.assert_status_ok();
 	})
 	.await
 }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn serves_once_someone_elses_secret_change_has_aged() {
-	commons_tests::server::run(async move |mut conn, _public, private| {
-		let group = insert_group(&mut conn, "kamaka-aged", json!({})).await;
-		insert_application(
-			&mut conn,
-			group,
-			"kamaka-aged-central",
-			"tamanu-central",
-			None,
-			json!({}),
-		)
-		.await;
-		private
-			.post("/api/inventory_secrets/set")
-			.json(&json!({
-				"server_group_id": group,
-				"rank": "dev",
-				"name": "salt",
-				"value": "pepper",
-			}))
-			.await
-			.assert_status_success();
-		conn.batch_execute(&format!(
-			"UPDATE inventory_secret_variables
-			 SET set_by = 'someone@else', updated_at = now() - interval '1 hour'
-			 WHERE server_group_id = '{group}'"
-		))
-		.await
-		.expect("age the change");
-
-		let response = private
-			.post("/api/inventory/for_group")
-			.json(&json!({ "group": "kamaka-aged" }))
-			.await;
-		response.assert_status_ok();
-	})
-	.await
-}
+// --- planned upgrades ---
 
 async fn plan_upgrade(
 	conn: &mut AsyncPgConnection,
@@ -929,137 +757,128 @@ async fn plan_upgrade(
 	.expect("plan upgrade");
 }
 
-/// An upgrade of production is permitted by the group's open plan and refused
-/// without one.
 #[tokio::test(flavor = "multi_thread")]
 async fn refuses_an_unplanned_upgrade_of_production() {
 	commons_tests::server::run(async move |mut conn, _public, private| {
-		let group = insert_group(&mut conn, "kamaka-unplanned", json!({})).await;
+		let group = insert_group(&mut conn, "kamaka-unplanned").await;
 		insert_ranked_application(
 			&mut conn,
 			group,
-			"kamaka-unplanned-central",
+			"kamaka-central",
 			"tamanu-central",
 			Some("production"),
 			None,
-			json!({}),
 		)
 		.await;
 
 		let response = private
-			.post("/api/inventory/for_group")
-			.json(&json!({ "group": "kamaka-unplanned", "intent": "upgrade" }))
+			.post("/api/inventory/take_lease")
+			.json(&json!({ "server_group_id": group, "intent": "upgrade" }))
 			.await;
-		response.assert_status_conflict();
-		let detail = response.text();
-		assert!(detail.contains("upgrade plan"), "{detail}");
+		response.assert_status(axum::http::StatusCode::CONFLICT);
+		assert!(
+			response.json::<Value>()["detail"]
+				.as_str()
+				.expect("detail")
+				.contains("no upgrade plan"),
+		);
 	})
 	.await
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn serves_a_planned_upgrade_of_production() {
+async fn takes_a_planned_upgrade_of_production() {
 	commons_tests::server::run(async move |mut conn, _public, private| {
-		let group = insert_group(&mut conn, "kamaka-planned", json!({})).await;
+		let group = insert_group(&mut conn, "kamaka-planned").await;
 		insert_ranked_application(
 			&mut conn,
 			group,
-			"kamaka-planned-central",
+			"kamaka-central",
 			"tamanu-central",
 			Some("production"),
 			None,
-			json!({}),
 		)
 		.await;
 		plan_upgrade(&mut conn, group, "", "").await;
 
 		let response = private
-			.post("/api/inventory/for_group")
-			.json(&json!({ "group": "kamaka-planned", "intent": "upgrade" }))
+			.post("/api/inventory/take_lease")
+			.json(&json!({ "server_group_id": group, "intent": "upgrade" }))
 			.await;
 		response.assert_status_ok();
+		assert_eq!(response.json::<Value>()["intent"], "upgrade");
 	})
 	.await
 }
 
-/// A withdrawn plan says the deployment is no longer going there, so it
-/// permits nothing.
 #[tokio::test(flavor = "multi_thread")]
 async fn refuses_an_upgrade_whose_plan_was_withdrawn() {
 	commons_tests::server::run(async move |mut conn, _public, private| {
-		let group = insert_group(&mut conn, "kamaka-withdrawn", json!({})).await;
+		let group = insert_group(&mut conn, "kamaka-withdrawn").await;
 		insert_ranked_application(
 			&mut conn,
 			group,
-			"kamaka-withdrawn-central",
+			"kamaka-central",
 			"tamanu-central",
 			Some("production"),
 			None,
-			json!({}),
 		)
 		.await;
-		plan_upgrade(
-			&mut conn,
-			group,
-			", withdrawn_at, withdrawn_by",
-			", now(), 'someone@else'",
-		)
-		.await;
+		plan_upgrade(&mut conn, group, ", withdrawn_at", ", NOW()").await;
 
-		let response = private
-			.post("/api/inventory/for_group")
-			.json(&json!({ "group": "kamaka-withdrawn", "intent": "upgrade" }))
-			.await;
-		response.assert_status_conflict();
-	})
-	.await
-}
-
-/// A configuration run moves nothing, so there is nothing to plan.
-#[tokio::test(flavor = "multi_thread")]
-async fn serves_an_unplanned_configuration_run_on_production() {
-	commons_tests::server::run(async move |mut conn, _public, private| {
-		let group = insert_group(&mut conn, "kamaka-config", json!({})).await;
-		insert_ranked_application(
-			&mut conn,
-			group,
-			"kamaka-config-central",
-			"tamanu-central",
-			Some("production"),
-			None,
-			json!({}),
-		)
-		.await;
-
-		let response = private
-			.post("/api/inventory/for_group")
-			.json(&json!({ "group": "kamaka-config" }))
-			.await;
-		response.assert_status_ok();
+		private
+			.post("/api/inventory/take_lease")
+			.json(&json!({ "server_group_id": group, "intent": "upgrade" }))
+			.await
+			.assert_status(axum::http::StatusCode::CONFLICT);
 	})
 	.await
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn serves_an_unplanned_upgrade_at_another_rank() {
+async fn takes_an_unplanned_configuration_run_on_production() {
 	commons_tests::server::run(async move |mut conn, _public, private| {
-		let group = insert_group(&mut conn, "kamaka-demo-up", json!({})).await;
+		let group = insert_group(&mut conn, "kamaka-configure").await;
 		insert_ranked_application(
 			&mut conn,
 			group,
-			"kamaka-demo-up-central",
+			"kamaka-central",
+			"tamanu-central",
+			Some("production"),
+			None,
+		)
+		.await;
+
+		private
+			.post("/api/inventory/take_lease")
+			.json(&json!({ "server_group_id": group }))
+			.await
+			.assert_status_ok();
+	})
+	.await
+}
+
+/// A plan is for where a deployment's real users are, so another rank needs
+/// none.
+#[tokio::test(flavor = "multi_thread")]
+async fn takes_an_unplanned_upgrade_at_another_rank() {
+	commons_tests::server::run(async move |mut conn, _public, private| {
+		let group = insert_group(&mut conn, "kamaka-demo").await;
+		insert_ranked_application(
+			&mut conn,
+			group,
+			"kamaka-demo-central",
 			"tamanu-central",
 			Some("demo"),
 			None,
-			json!({}),
 		)
 		.await;
 
-		let response = private
-			.post("/api/inventory/for_group")
-			.json(&json!({ "group": "kamaka-demo-up", "intent": "upgrade" }))
-			.await;
-		response.assert_status_ok();
+		private
+			.post("/api/inventory/take_lease")
+			.json(&json!({ "server_group_id": group, "intent": "upgrade" }))
+			.await
+			.assert_status_ok();
 	})
 	.await
 }

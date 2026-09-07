@@ -107,9 +107,8 @@ export type FacilityServerStatus = Solidify<Schemas["FacilityServerStatus"]>;
 export type ServerGroupCard = Solidify<Schemas["ServerGroupCard"]>;
 export type ServerGroup = Solidify<Schemas["ServerGroup"]>;
 export type GroupDetail = Solidify<Schemas["GroupDetail"]>;
-export type InventorySecretVariable = Solidify<
-	Schemas["InventorySecretVariable"]
->;
+export type InventoryVariable = Solidify<Schemas["InventoryVariable"]>;
+export type InventoryLease = Solidify<Schemas["InventoryLease"]>;
 export type SummaryData = Solidify<Schemas["SummaryData"]>;
 export type CheckDetailData = Solidify<Schemas["CheckDetailData"]>;
 export type NamespaceRef = Solidify<Schemas["NamespaceRef"]>;

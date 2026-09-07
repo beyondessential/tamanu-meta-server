@@ -1,13 +1,15 @@
-//! Operator-facing environment inventory: a group's live applications at one
-//! rank, the address each is reached at, and the variables that configure them.
+//! An environment's inventory: the machines a configuration run acts on, the
+//! applications each carries, the address each is reached at, and the
+//! variables that configure them.
 //!
-//! Assembled from what Canopy already holds (group membership, rank,
-//! application type, the tailnet name of the device bound to each application's
-//! machine, and the application/group tag merge), so configuration tooling
-//! reads the fleet from here rather than from a file kept in step by hand.
+//! Assembled from what canopy already holds (group membership, rank, the
+//! applications on each machine, and the tailnet name of the device bound to
+//! it) plus the variables set against the group, the environment, and the
+//! machine (see [`super::inventory_variables`]).
 //!
-//! It carries the secret variables too (see [`super::inventory_secrets`]), which
-//! is why it is served to an administrator alone.
+//! An environment holds at most one run lease and the inventory is served to
+//! its holder alone, so two runs never act on one environment at once. It
+//! carries secret values, so it is served to an administrator.
 // spec: INV
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -16,40 +18,45 @@ use axum::Json;
 use axum::extract::State;
 use canopy_utoipa_axum::{router::OpenApiRouter, routes};
 use commons_errors::{AppError, ProblemDetailsSchema, Result};
-use commons_servers::tailscale_auth::TailscaleAdmin;
+use commons_servers::tailscale_auth::{TailscaleAdmin, TailscaleUser};
 use commons_types::{
 	Uuid,
-	server::{RESERVED_TAG_PREFIX, TagMap, app_type::ApplicationType, rank::ServerRank},
+	server::{app_type::ApplicationType, rank::ServerRank},
 };
 use database::{
 	Device,
 	applications::Application,
-	inventory_secret_variables::{InventorySecretVariable, SecretScope},
+	inventory_leases::{InventoryLease, RunIntent},
+	inventory_variables::{InventoryVariable, VariableScope},
 	machines::Machine,
 	maintenance_windows::MaintenanceWindow,
 	server_groups::ServerGroup,
 	upgrade_plans::UpgradePlan,
 };
-use jiff::{SignedDuration, Timestamp};
+use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use utoipa::ToSchema;
 
 use crate::state::AppState;
 
-/// How long after someone else sets a secret variable a run on the
-/// environment is held off. The same for every environment.
-const SETTINGS_RECENCY: SignedDuration = SignedDuration::from_mins(10);
+/// The variable naming the address a run connects to, which overrides the one
+/// canopy holds for the machine.
+const ANSIBLE_HOST: &str = "ansible_host";
 
 pub fn routes() -> OpenApiRouter<AppState> {
-	OpenApiRouter::new().routes(routes!(for_group))
+	OpenApiRouter::new()
+		.routes(routes!(for_group))
+		.routes(routes!(take_lease))
+		.routes(routes!(extend_lease))
+		.routes(routes!(release_lease))
+		.routes(routes!(lease_for_group))
 }
 
-/// Which environment to serve the inventory for: exactly one of the group's
-/// identifier or its name, and the rank where the group holds more than one
-/// environment.
+/// Which environment to act on: exactly one of the group's identifier or its
+/// name, and the rank where the group holds more than one environment.
 #[derive(Debug, Clone, Deserialize, ToSchema)]
-pub struct InventoryArgs {
+pub struct EnvironmentArgs {
 	/// Identifier of the server group.
 	#[serde(default)]
 	pub server_group_id: Option<Uuid>,
@@ -60,52 +67,74 @@ pub struct InventoryArgs {
 	/// group's live applications span more than one rank.
 	#[serde(default)]
 	pub rank: Option<ServerRank>,
-	/// What the run is doing to the environment. Configuring where not named.
+}
+
+/// Take the lease on an environment, which a run holds while it runs.
+#[derive(Debug, Clone, Deserialize, ToSchema)]
+pub struct TakeLeaseArgs {
+	#[serde(flatten)]
+	pub environment: EnvironmentArgs,
+	/// What the run intends. Configuring where not named.
 	#[serde(default)]
 	pub intent: RunIntent,
+	/// What the holder is doing, shown to whoever is refused meanwhile.
+	#[serde(default)]
+	pub note: Option<String>,
+	/// Take over a lease another operator holds, which is audited.
+	#[serde(default)]
+	pub take_over: bool,
 }
 
-/// What a run intends to do to the environment it reads. An upgrade of a
-/// production environment needs the group's open upgrade plan behind it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize, Serialize, ToSchema)]
-#[serde(rename_all = "lowercase")]
-pub enum RunIntent {
-	#[default]
-	Configure,
-	Upgrade,
+/// Name a lease.
+#[derive(Debug, Clone, Deserialize, ToSchema)]
+pub struct LeaseArgs {
+	/// Identifier of the lease.
+	pub lease_id: Uuid,
 }
 
-/// One application in an environment.
+/// Read an environment's inventory under a lease held on it.
+#[derive(Debug, Clone, Deserialize, ToSchema)]
+pub struct InventoryArgs {
+	/// Identifier of the lease the run holds, from `take_lease`.
+	pub lease_id: Uuid,
+}
+
+/// One application on a machine, so a run knows what it is configuring there.
 #[derive(Debug, Clone, Serialize, ToSchema)]
-pub struct InventoryHost {
+pub struct InventoryApplication {
 	/// Identifier of the application.
 	pub id: Uuid,
 	/// The application's name within its group, falling back to its host and
-	/// then its identifier, so a member always has something to be addressed
-	/// as.
+	/// then its identifier.
 	pub name: String,
 	/// What the application is: the software and the role it plays together.
 	pub r#type: ApplicationType,
-	/// Identifier of the machine the application runs on.
-	pub machine_id: Uuid,
-	/// The address to reach the application at: the tailnet name of the device
-	/// bound to its machine, or its own recorded host where no device is bound.
-	/// Null when Canopy holds neither, in which case a variable has to supply
-	/// it.
+}
+
+/// One machine in an environment.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct InventoryHost {
+	/// Identifier of the machine.
+	pub id: Uuid,
+	/// The machine's name, falling back to its identifier.
+	pub name: String,
+	/// The address to reach it at: an `ansible_host` variable, the tailnet name
+	/// of the device bound to it, or the recorded host of an application on it.
+	/// Null where canopy holds none of those.
 	pub address: Option<String>,
-	/// The application's effective variables: its own tags over its group's,
-	/// with the reserved read-only tags left out. This is what a run acts on.
+	/// The applications the machine carries in this environment, by name.
+	pub applications: Vec<InventoryApplication>,
+	/// The effective variables: the machine's over the environment's over the
+	/// group's. This is what a run acts on.
 	pub vars: VarMap,
-	/// The variables the application sets itself, so a value inherited from the
-	/// group can be told from one set here even where the two agree.
+	/// The variables the machine sets itself, so a value inherited from a wider
+	/// scope can be told from one set here even where the two agree.
 	pub own_vars: VarMap,
-	/// Which of `vars` are secret, so a caller can keep them out of anything it
-	/// writes down.
+	/// Which of `vars` are secret.
 	pub secret_vars: Vec<String>,
 }
 
-/// An environment's inventory: its applications and the variables that
-/// configure them.
+/// An environment's inventory.
 #[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct InventoryView {
 	/// Identifier of the server group the inventory covers.
@@ -114,18 +143,16 @@ pub struct InventoryView {
 	pub group: String,
 	/// Rank of the environment served.
 	pub rank: ServerRank,
-	/// Variables belonging to the environment rather than to any one
-	/// application. Every application carries these too, under its own
-	/// overrides.
+	/// The group's and the environment's variables, merged. Every machine
+	/// below carries these too, under its own overrides.
 	pub vars: VarMap,
 	/// Which of `vars` are secret.
 	pub secret_vars: Vec<String>,
-	/// The environment's applications, ordered by name.
+	/// The environment's machines, ordered by name.
 	pub hosts: Vec<InventoryHost>,
 }
 
-/// Variables as a JSON object, whose values are whatever the stored tags
-/// decoded to.
+/// Variables as a JSON object.
 #[derive(Debug, Clone, Default, Serialize)]
 #[serde(transparent)]
 pub struct VarMap(pub BTreeMap<String, Value>);
@@ -143,41 +170,22 @@ impl utoipa::PartialSchema for VarMap {
 
 impl utoipa::ToSchema for VarMap {}
 
-/// A stored tag value as a variable.
-///
-/// `true` and `false` become booleans and a JSON array or object becomes that
-/// array or object; everything else stays the text it was stored as, a bare
-/// number included, since a number here is far more often a version or an
-/// identifier than a quantity.
-fn decode(value: &str) -> Value {
-	match value {
-		"true" => Value::Bool(true),
-		"false" => Value::Bool(false),
-		_ if value.starts_with('[') || value.starts_with('{') => {
-			serde_json::from_str(value).unwrap_or_else(|_| Value::String(value.to_owned()))
-		}
-		_ => Value::String(value.to_owned()),
-	}
-}
-
-fn vars(tags: &TagMap) -> VarMap {
-	VarMap(
-		tags.0
-			.iter()
-			.filter(|(key, _)| !key.starts_with(RESERVED_TAG_PREFIX))
-			.map(|(key, value)| (key.clone(), decode(value)))
-			.collect(),
-	)
+/// The environment a request names, and the machines and applications in it.
+struct Environment {
+	group: ServerGroup,
+	rank: ServerRank,
+	applications: Vec<Application>,
+	machines: Vec<Machine>,
 }
 
 async fn resolve_group(
 	conn: &mut database::diesel_async::AsyncPgConnection,
-	args: InventoryArgs,
+	args: &EnvironmentArgs,
 ) -> Result<ServerGroup> {
-	match (args.server_group_id, args.group) {
+	match (args.server_group_id, args.group.as_deref()) {
 		(Some(id), None) => ServerGroup::get_by_id(conn, id).await,
 		(None, Some(name)) => {
-			let (live, archived): (Vec<_>, Vec<_>) = ServerGroup::find_by_name(conn, &name)
+			let (live, archived): (Vec<_>, Vec<_>) = ServerGroup::find_by_name(conn, name)
 				.await?
 				.into_iter()
 				.partition(|group| group.deleted_at.is_none());
@@ -198,43 +206,11 @@ async fn resolve_group(
 	}
 }
 
-/// Serve one environment's inventory.
-///
-/// Refuses a group Canopy does not have, one that has been archived, one
-/// holding several environments with no rank named, a rank with no live
-/// application to configure, an environment someone else has work under way on
-/// (a maintenance window they declared, or a secret variable they set moments
-/// ago), an upgrade of production with no plan recorded, and a secret variable
-/// whose value cannot be read, saying which it was: a refusal is a decision to
-/// respect, and a caller has to be able to tell it from Canopy being
-/// unreachable.
-///
-/// Requires admin access, the inventory carrying the secret variables' values.
-#[utoipa::path(
-	post,
-	path = "/for_group",
-	operation_id = "inventory_for_group",
-	tag = "inventory",
-	security(("tailscale-admin" = [])),
-	request_body = InventoryArgs,
-	responses(
-		(status = 200, body = InventoryView),
-		(status = 400, description = "Neither or both of the group arguments", body = ProblemDetailsSchema),
-		(status = 404, description = "No such server group", body = ProblemDetailsSchema),
-		(status = 409, description = "Archived, empty, ambiguously named, spanning environments, under someone else's work, or an unplanned upgrade of production", body = ProblemDetailsSchema),
-		(status = 502, description = "A secret variable could not be read", body = ProblemDetailsSchema),
-	),
-)]
-pub async fn for_group(
-	State(state): State<AppState>,
-	admin: TailscaleAdmin,
-	Json(args): Json<InventoryArgs>,
-) -> Result<Json<InventoryView>> {
-	let mut conn = state.db.get().await?;
-	let args_rank = args.rank;
-	let intent = args.intent;
-	let group = resolve_group(&mut conn, args).await?;
-
+async fn resolve_environment(
+	conn: &mut database::diesel_async::AsyncPgConnection,
+	args: &EnvironmentArgs,
+) -> Result<Environment> {
+	let group = resolve_group(conn, args).await?;
 	if group.deleted_at.is_some() {
 		return Err(AppError::Conflict(format!(
 			"server group {:?} is archived",
@@ -242,7 +218,7 @@ pub async fn for_group(
 		)));
 	}
 
-	let members = Application::list_live_in_group(&mut conn, group.id).await?;
+	let members = Application::list_live_in_group(conn, group.id).await?;
 	if members.is_empty() {
 		return Err(AppError::Conflict(format!(
 			"server group {:?} has no live members",
@@ -256,7 +232,7 @@ pub async fn for_group(
 		.iter()
 		.map(|application| application.rank.unwrap_or_default())
 		.collect();
-	let rank = match args_rank {
+	let rank = match args.rank {
 		Some(rank) => rank,
 		None if ranks.len() > 1 => {
 			return Err(AppError::Conflict(format!(
@@ -284,7 +260,85 @@ pub async fn for_group(
 		)));
 	}
 
-	if intent == RunIntent::Upgrade
+	let machine_ids: Vec<Uuid> = applications
+		.iter()
+		.map(|application| application.machine_id)
+		.collect::<BTreeSet<_>>()
+		.into_iter()
+		.collect();
+	let machines = Machine::get_many(conn, &machine_ids).await?;
+
+	Ok(Environment {
+		group,
+		rank,
+		applications,
+		machines,
+	})
+}
+
+/// Take the environment's run lease.
+///
+/// Refuses a group canopy does not have, one that has been archived, one
+/// holding several environments with no rank named, a rank with no live
+/// application to configure, an environment another operator holds or has
+/// declared maintenance over, and an upgrade of production with no plan
+/// recorded, saying which it was so an operator knows what to do or who to
+/// wait for.
+#[utoipa::path(
+	post,
+	path = "/take_lease",
+	operation_id = "inventory_take_lease",
+	tag = "inventory",
+	security(("tailscale-admin" = [])),
+	request_body = TakeLeaseArgs,
+	responses(
+		(status = 200, body = InventoryLease),
+		(status = 400, description = "Neither or both of the group arguments", body = ProblemDetailsSchema),
+		(status = 404, description = "No such server group", body = ProblemDetailsSchema),
+		(status = 409, description = "Archived, empty, ambiguously named, spanning environments, held by someone else, under someone else's maintenance, or an unplanned upgrade of production", body = ProblemDetailsSchema),
+	),
+)]
+pub async fn take_lease(
+	State(state): State<AppState>,
+	admin: TailscaleAdmin,
+	Json(args): Json<TakeLeaseArgs>,
+) -> Result<Json<InventoryLease>> {
+	let mut conn = state.db.get().await?;
+	let environment = resolve_environment(&mut conn, &args.environment).await?;
+	let group = &environment.group;
+	let rank = environment.rank;
+	let login = admin.0.login.as_str();
+	let now = Timestamp::now();
+
+	if let Some(held) = InventoryLease::open_for(&mut conn, group.id, rank).await?
+		&& held.holds_at(now)
+		&& held.held_by.as_deref().is_some_and(|who| who != login)
+		&& !args.take_over
+	{
+		return Err(AppError::Conflict(held_by_another(&held)));
+	}
+
+	let machine_ids: Vec<Uuid> = environment
+		.machines
+		.iter()
+		.map(|machine| machine.id)
+		.collect();
+	let windows = MaintenanceWindow::open_over(&mut conn, group.id, &machine_ids).await?;
+	if let Some(window) = windows.iter().find(|window| {
+		window.holds_at(now)
+			&& window
+				.declared_by
+				.as_deref()
+				.is_some_and(|who| who != login)
+	}) {
+		return Err(AppError::Conflict(under_maintenance(
+			group,
+			&environment.machines,
+			window,
+		)));
+	}
+
+	if args.intent == RunIntent::Upgrade
 		&& rank == ServerRank::Production
 		&& UpgradePlan::open_for_group(&mut conn, group.id)
 			.await?
@@ -296,141 +350,380 @@ pub async fn for_group(
 		)));
 	}
 
-	// The identity speaks for the box, so an application's address comes from
-	// the device bound to the machine it runs on.
-	let machine_ids: Vec<Uuid> = applications
-		.iter()
-		.map(|application| application.machine_id)
-		.collect();
-	let machines = Machine::get_many(&mut conn, &machine_ids).await?;
-	let devices_by_machine: BTreeMap<Uuid, Uuid> = machines
-		.iter()
-		.filter_map(|machine| machine.device_id.map(|device| (machine.id, device)))
-		.collect();
-	let device_ids: Vec<Uuid> = devices_by_machine.values().copied().collect();
-	let tailnet = Device::tailscale_names_by_ids(&mut conn, &device_ids).await?;
-
-	let application_ids: Vec<Uuid> = applications
-		.iter()
-		.map(|application| application.id)
-		.collect();
-	let now = Timestamp::now();
-	let login = admin.0.login.as_str();
-
-	let windows = MaintenanceWindow::open_over(&mut conn, group.id, &machine_ids).await?;
-	if let Some(window) = windows.iter().find(|window| {
-		window.holds_at(now)
-			&& window
-				.declared_by
-				.as_deref()
-				.is_some_and(|who| who != login)
-	}) {
-		return Err(AppError::Conflict(under_maintenance(
-			&group, &machines, window,
-		)));
-	}
-
-	let environment_declared =
-		InventorySecretVariable::list_for_environment(&mut conn, group.id, rank).await?;
-	let application_declared =
-		InventorySecretVariable::list_for_applications(&mut conn, &application_ids).await?;
-	if let Some(variable) = environment_declared
-		.iter()
-		.chain(application_declared.iter())
-		.find(|variable| {
-			variable.set_by.as_deref().is_some_and(|who| who != login)
-				&& variable.updated_at > now - SETTINGS_RECENCY
-		}) {
-		return Err(AppError::Conflict(recently_changed(
-			&group,
-			&applications,
-			variable,
-		)));
-	}
-
-	let environment_secrets = read_secrets(
-		&state,
-		SecretScope::Environment {
-			group_id: group.id,
-			rank,
-		},
-		&environment_declared,
+	let taken = InventoryLease::take(
+		&mut conn,
+		group.id,
+		rank,
+		args.intent,
+		Some(login),
+		args.note.as_deref(),
 	)
 	.await?;
-	let mut application_secrets: BTreeMap<Uuid, VarMap> = BTreeMap::new();
-	for (application_id, declared) in by_application(application_declared) {
-		let read = read_secrets(
-			&state,
-			SecretScope::Application { application_id },
-			&declared,
-		)
-		.await?;
-		application_secrets.insert(application_id, read);
+
+	tracing::info!(
+		login = %admin.0.login,
+		group = %group.name,
+		%rank,
+		intent = %args.intent,
+		take_over = args.take_over,
+		"inventory lease taken"
+	);
+	Ok(Json(taken))
+}
+
+/// Push a held lease's expiry out, so a run still going keeps the environment.
+///
+/// Only the holder can extend, and only while the lease is unreleased: one that
+/// has been released is gone, and taking a fresh one goes through the same
+/// refusals a first one does.
+#[utoipa::path(
+	post,
+	path = "/extend_lease",
+	operation_id = "inventory_extend_lease",
+	tag = "inventory",
+	security(("tailscale-admin" = [])),
+	request_body = LeaseArgs,
+	responses(
+		(status = 200, body = InventoryLease),
+		(status = 404, description = "No such lease", body = ProblemDetailsSchema),
+		(status = 409, description = "Held by someone else, or no longer held", body = ProblemDetailsSchema),
+	),
+)]
+pub async fn extend_lease(
+	State(state): State<AppState>,
+	admin: TailscaleAdmin,
+	Json(args): Json<LeaseArgs>,
+) -> Result<Json<InventoryLease>> {
+	let mut conn = state.db.get().await?;
+	let lease = InventoryLease::get(&mut conn, args.lease_id).await?;
+	held_by_caller(&lease, &admin.0.login)?;
+	let extended = InventoryLease::extend(&mut conn, lease.id).await?;
+	tracing::info!(login = %admin.0.login, lease = %lease.id, "inventory lease extended");
+	Ok(Json(extended))
+}
+
+/// Give the environment back when the run ends.
+///
+/// Releasing is audited with who did it, since it can be another operator
+/// taking work over rather than the holder finishing.
+#[utoipa::path(
+	post,
+	path = "/release_lease",
+	operation_id = "inventory_release_lease",
+	tag = "inventory",
+	security(("tailscale-admin" = [])),
+	request_body = LeaseArgs,
+	responses(
+		(status = 200, description = "Released", body = ()),
+		(status = 404, description = "No such lease, or it was already released", body = ProblemDetailsSchema),
+	),
+)]
+pub async fn release_lease(
+	State(state): State<AppState>,
+	admin: TailscaleAdmin,
+	Json(args): Json<LeaseArgs>,
+) -> Result<Json<()>> {
+	let mut conn = state.db.get().await?;
+	let lease = InventoryLease::get(&mut conn, args.lease_id).await?;
+	if !InventoryLease::release(&mut conn, lease.id, Some(&admin.0.login)).await? {
+		return Err(AppError::NotFound("that lease is no longer held".into()));
+	}
+	tracing::info!(
+		login = %admin.0.login,
+		lease = %lease.id,
+		held_by = lease.held_by.as_deref().unwrap_or("unknown"),
+		"inventory lease released"
+	);
+	Ok(Json(()))
+}
+
+/// The lease held over an environment, so the group page can say a run would
+/// be refused and by whom.
+///
+/// Null where none holds, an expired lease included. Available to any operator:
+/// it names who is running and until when, and carries nothing a run receives.
+#[utoipa::path(
+	post,
+	path = "/lease_for_group",
+	operation_id = "inventory_lease_for_group",
+	tag = "inventory",
+	security(("tailscale-user" = [])),
+	request_body = EnvironmentArgs,
+	responses(
+		(status = 200, body = Option<InventoryLease>),
+		(status = 404, description = "No such server group", body = ProblemDetailsSchema),
+	),
+)]
+pub async fn lease_for_group(
+	State(state): State<AppState>,
+	_user: TailscaleUser,
+	Json(args): Json<EnvironmentArgs>,
+) -> Result<Json<Option<InventoryLease>>> {
+	let mut conn = state.db.get().await?;
+	let group = resolve_group(&mut conn, &args).await?;
+	let rank = args.rank.unwrap_or_default();
+	Ok(Json(
+		InventoryLease::open_for(&mut conn, group.id, rank)
+			.await?
+			.filter(|lease| lease.holds_at(Timestamp::now())),
+	))
+}
+
+/// Serve the inventory of the environment the caller holds the lease on.
+///
+/// Refuses a lease that is not the caller's or no longer holds, and a secret
+/// variable whose value cannot be read: a run receiving a machine that looks
+/// configured and is missing a value is worse than one that does not run.
+#[utoipa::path(
+	post,
+	path = "/for_group",
+	operation_id = "inventory_for_group",
+	tag = "inventory",
+	security(("tailscale-admin" = [])),
+	request_body = InventoryArgs,
+	responses(
+		(status = 200, body = InventoryView),
+		(status = 404, description = "No such lease", body = ProblemDetailsSchema),
+		(status = 409, description = "The lease is someone else's, no longer holds, or the environment is gone", body = ProblemDetailsSchema),
+		(status = 502, description = "A secret variable could not be read", body = ProblemDetailsSchema),
+	),
+)]
+pub async fn for_group(
+	State(state): State<AppState>,
+	admin: TailscaleAdmin,
+	Json(args): Json<InventoryArgs>,
+) -> Result<Json<InventoryView>> {
+	let mut conn = state.db.get().await?;
+	let lease = InventoryLease::get(&mut conn, args.lease_id).await?;
+	held_by_caller(&lease, &admin.0.login)?;
+	if !lease.holds_at(Timestamp::now()) {
+		return Err(AppError::Conflict(
+			"that lease has expired; take one again before reading the inventory".into(),
+		));
+	}
+
+	let environment = resolve_environment(
+		&mut conn,
+		&EnvironmentArgs {
+			server_group_id: Some(lease.server_group_id),
+			group: None,
+			rank: Some(lease.rank),
+		},
+	)
+	.await?;
+	let Environment {
+		group,
+		rank,
+		applications,
+		machines,
+	} = environment;
+
+	let machine_ids: Vec<Uuid> = machines.iter().map(|machine| machine.id).collect();
+	let device_ids: Vec<Uuid> = machines
+		.iter()
+		.filter_map(|machine| machine.device_id)
+		.collect();
+	let tailnet = Device::tailscale_names_by_ids(&mut conn, &device_ids).await?;
+
+	let group_scope = VariableScope::Group { group_id: group.id };
+	let environment_scope = VariableScope::Environment {
+		group_id: group.id,
+		rank,
+	};
+	let mut wide = Scoped::default();
+	wide.add(
+		&state,
+		group_scope,
+		&InventoryVariable::list_at(&mut conn, group_scope).await?,
+	)
+	.await?;
+	wide.add(
+		&state,
+		environment_scope,
+		&InventoryVariable::list_at(&mut conn, environment_scope).await?,
+	)
+	.await?;
+
+	let mut by_machine: BTreeMap<Uuid, Vec<InventoryVariable>> = BTreeMap::new();
+	for variable in InventoryVariable::list_for_machines(&mut conn, &machine_ids).await? {
+		if let Some(machine_id) = variable.machine_id {
+			by_machine.entry(machine_id).or_default().push(variable);
+		}
 	}
 
 	tracing::info!(
 		login = %admin.0.login,
 		group = %group.name,
 		%rank,
-		?intent,
-		secrets = environment_secrets.0.len()
-			+ application_secrets.values().map(|vars| vars.0.len()).sum::<usize>(),
+		intent = %lease.intent,
+		lease = %lease.id,
 		"inventory served"
 	);
 
-	let mut environment_vars = vars(&group.tags);
-	let environment_secret_names: Vec<String> = environment_secrets.0.keys().cloned().collect();
-	environment_vars.0.extend(environment_secrets.0);
+	let mut hosts = Vec::with_capacity(machines.len());
+	for machine in &machines {
+		let mut own = Scoped::default();
+		let scope = VariableScope::Machine {
+			machine_id: machine.id,
+		};
+		own.add(
+			&state,
+			scope,
+			by_machine.get(&machine.id).map_or(&[][..], Vec::as_slice),
+		)
+		.await?;
 
-	let mut hosts: Vec<InventoryHost> = applications
-		.into_iter()
-		.map(|application| {
-			let host = application
-				.host
-				.as_ref()
-				.and_then(|host| host.0.host_str().map(str::to_owned));
-			let address = devices_by_machine
-				.get(&application.machine_id)
-				.and_then(|device| tailnet.get(device).cloned())
-				.or_else(|| host.clone());
-			let own_secrets = application_secrets
-				.remove(&application.id)
-				.unwrap_or_default();
-			let mut secret_vars = environment_secret_names.clone();
-			secret_vars.extend(own_secrets.0.keys().cloned());
-			secret_vars.sort();
-			secret_vars.dedup();
+		let mut effective = wide.clone();
+		effective.overlay(&own);
 
-			let mut own_vars = vars(&application.tags);
-			own_vars.0.extend(own_secrets.0);
-			let mut effective = environment_vars.0.clone();
-			effective.extend(own_vars.0.iter().map(|(k, v)| (k.clone(), v.clone())));
-			InventoryHost {
-				name: application
-					.name
-					.clone()
-					.or(host)
-					.unwrap_or_else(|| application.id.to_string()),
-				vars: VarMap(effective),
-				own_vars,
-				secret_vars,
-				id: application.id,
-				r#type: application.r#type,
-				machine_id: application.machine_id,
-				address,
-			}
-		})
-		.collect();
+		let on_machine: Vec<&Application> = applications
+			.iter()
+			.filter(|application| application.machine_id == machine.id)
+			.collect();
+		let address = effective
+			.vars
+			.0
+			.get(ANSIBLE_HOST)
+			.and_then(Value::as_str)
+			.map(str::to_owned)
+			.or_else(|| {
+				machine
+					.device_id
+					.and_then(|device| tailnet.get(&device).cloned())
+			})
+			.or_else(|| {
+				on_machine
+					.iter()
+					.find_map(|application| host_of(application))
+			});
+
+		hosts.push(InventoryHost {
+			id: machine.id,
+			name: machine
+				.name
+				.clone()
+				.unwrap_or_else(|| machine.id.to_string()),
+			address,
+			applications: on_machine
+				.into_iter()
+				.map(|application| InventoryApplication {
+					id: application.id,
+					name: application
+						.name
+						.clone()
+						.or_else(|| host_of(application))
+						.unwrap_or_else(|| application.id.to_string()),
+					r#type: application.r#type.clone(),
+				})
+				.collect(),
+			vars: effective.vars,
+			own_vars: own.vars,
+			secret_vars: effective.secret,
+		});
+	}
 	hosts.sort_by(|a, b| a.name.cmp(&b.name));
 
 	Ok(Json(InventoryView {
 		group_id: group.id,
 		group: group.name,
 		rank,
-		vars: environment_vars,
-		secret_vars: environment_secret_names,
+		vars: wide.vars,
+		secret_vars: wide.secret,
 		hosts,
 	}))
+}
+
+/// Variables gathered from one or more scopes, with the names among them whose
+/// values are secret.
+#[derive(Debug, Clone, Default)]
+struct Scoped {
+	vars: VarMap,
+	secret: Vec<String>,
+}
+
+impl Scoped {
+	/// Fold one scope's variables in, over anything already gathered. Reads the
+	/// scope's Secret only where it holds a secret variable.
+	async fn add(
+		&mut self,
+		state: &AppState,
+		scope: VariableScope,
+		variables: &[InventoryVariable],
+	) -> Result<()> {
+		let secrets = if variables.iter().any(|variable| variable.is_secret) {
+			super::inventory_variables::secret_store(state)?
+				.try_read_keys(&scope.secret_name())
+				.await?
+				.unwrap_or_default()
+		} else {
+			BTreeMap::new()
+		};
+
+		for variable in variables {
+			let value = match &variable.value {
+				Some(value) => value.clone(),
+				None => {
+					let held = secrets.get(&variable.name).ok_or_else(|| {
+						AppError::Upstream(format!(
+							"secret variable {:?} has no value in the secret store",
+							variable.name
+						))
+					})?;
+					serde_json::from_str(held).unwrap_or_else(|_| Value::String(held.to_owned()))
+				}
+			};
+			self.vars.0.insert(variable.name.clone(), value);
+			if variable.is_secret && !self.secret.contains(&variable.name) {
+				self.secret.push(variable.name.clone());
+			}
+		}
+		self.secret.sort();
+		Ok(())
+	}
+
+	/// Lay a narrower scope's variables over these.
+	fn overlay(&mut self, narrower: &Self) {
+		self.vars
+			.0
+			.extend(narrower.vars.0.iter().map(|(k, v)| (k.clone(), v.clone())));
+		for name in &narrower.secret {
+			if !self.secret.contains(name) {
+				self.secret.push(name.clone());
+			}
+		}
+		// A name that stops being secret at the narrower scope stops being
+		// secret in the merge, the value a run receives being that one.
+		self.secret
+			.retain(|name| narrower.secret.contains(name) || !narrower.vars.0.contains_key(name));
+		self.secret.sort();
+	}
+}
+
+fn host_of(application: &Application) -> Option<String> {
+	application
+		.host
+		.as_ref()
+		.and_then(|host| host.0.host_str().map(str::to_owned))
+}
+
+fn held_by_caller(lease: &InventoryLease, login: &str) -> Result<()> {
+	match lease.held_by.as_deref() {
+		Some(who) if who == login => Ok(()),
+		_ => Err(AppError::Conflict(held_by_another(lease))),
+	}
+}
+
+fn held_by_another(lease: &InventoryLease) -> String {
+	format!(
+		"that environment's run lease is held by {} until {}{}",
+		lease.held_by.as_deref().unwrap_or("an operator"),
+		lease.expires_at.strftime("%Y-%m-%d %H:%M UTC"),
+		lease
+			.note
+			.as_deref()
+			.map(|note| format!("; {note}"))
+			.unwrap_or_default(),
+	)
 }
 
 fn under_maintenance(
@@ -451,20 +744,6 @@ fn under_maintenance(
 	)
 }
 
-fn recently_changed(
-	group: &ServerGroup,
-	applications: &[Application],
-	variable: &InventorySecretVariable,
-) -> String {
-	let who = variable.set_by.as_deref().unwrap_or("an operator");
-	format!(
-		"secret variable {:?} on {} was set by {who} at {}; their change may still be under way",
-		variable.name,
-		application_target(group, applications, variable.application_id),
-		variable.updated_at.strftime("%Y-%m-%d %H:%M UTC"),
-	)
-}
-
 fn machine_target(group: &ServerGroup, machines: &[Machine], machine_id: Option<Uuid>) -> String {
 	match machine_id.and_then(|id| machines.iter().find(|machine| machine.id == id)) {
 		Some(machine) => format!(
@@ -477,73 +756,4 @@ fn machine_target(group: &ServerGroup, machines: &[Machine], machine_id: Option<
 		),
 		None => format!("server group {:?}", group.name),
 	}
-}
-
-fn application_target(
-	group: &ServerGroup,
-	applications: &[Application],
-	application_id: Option<Uuid>,
-) -> String {
-	match application_id.and_then(|id| applications.iter().find(|it| it.id == id)) {
-		Some(application) => format!(
-			"application {:?} in group {:?}",
-			application
-				.name
-				.clone()
-				.or_else(|| {
-					application
-						.host
-						.as_ref()
-						.and_then(|host| host.0.host_str().map(str::to_owned))
-				})
-				.unwrap_or_else(|| application.id.to_string()),
-			group.name
-		),
-		None => format!("server group {:?}", group.name),
-	}
-}
-
-fn by_application(
-	declared: Vec<InventorySecretVariable>,
-) -> BTreeMap<Uuid, Vec<InventorySecretVariable>> {
-	let mut out: BTreeMap<Uuid, Vec<InventorySecretVariable>> = BTreeMap::new();
-	for var in declared {
-		if let Some(application_id) = var.application_id {
-			out.entry(application_id).or_default().push(var);
-		}
-	}
-	out
-}
-
-/// The values behind a scope's declared names.
-///
-/// A name Canopy holds but cannot produce a value for refuses the whole
-/// inventory: a run receiving a member that looks configured and is missing a
-/// value is worse than one that does not run.
-async fn read_secrets(
-	state: &AppState,
-	scope: SecretScope,
-	declared: &[InventorySecretVariable],
-) -> Result<VarMap> {
-	if declared.is_empty() {
-		return Ok(VarMap::default());
-	}
-
-	let kube = super::inventory_secrets::secret_store(state)?;
-	let held = kube
-		.try_read_keys(&scope.secret_name())
-		.await?
-		.unwrap_or_default();
-
-	let mut out = BTreeMap::new();
-	for var in declared {
-		let value = held.get(&var.name).ok_or_else(|| {
-			AppError::Upstream(format!(
-				"secret variable {:?} has no value in the secret store",
-				var.name
-			))
-		})?;
-		out.insert(var.name.clone(), decode(value));
-	}
-	Ok(VarMap(out))
 }
