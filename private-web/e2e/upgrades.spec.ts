@@ -503,6 +503,97 @@ test.describe("upgrades dashboard", () => {
 		await expect(row).toContainText("2030-04-05");
 		await expect(row).not.toContainText("FJT");
 	});
+
+	/// An environment that has reported no version cannot be placed against the
+	/// newest one, so it has no distance and nothing to plan towards. The list
+	/// exists to name what is behind, and a row that cannot say how far behind
+	/// it is would sit there permanently with nothing anyone can do about it.
+	///
+	/// spec: UPG#the-dashboard
+	test("an environment that has reported no version is not listed as behind", async ({
+		page,
+		sql,
+	}) => {
+		const behind = await seedServerGroup(sql, { name: "drifting" });
+		const silent = await seedServerGroup(sql, { name: "silent" });
+		await runningAt(sql, behind.id, "2.60.0");
+		// A server with no status row has reported nothing.
+		await seedServer(sql, { groupId: silent.id, rank: "production" });
+		await seedVersion(sql, { major: 2, minor: 61, patch: 0 });
+
+		await page.goto("/upgrades");
+		await page
+			.getByRole("button", { name: "Show groups with no plan" })
+			.click();
+
+		await expect(
+			page.getByTestId("unplanned-upgrade-row").filter({ hasText: "drifting" }),
+		).toBeVisible();
+		await expect(page.getByTestId("unplanned-upgrades")).not.toContainText(
+			"silent",
+		);
+	});
+
+	/// The tables carry seven columns and a note, so at a narrow width they have
+	/// to scroll inside their own card. Before this they ran out past the card's
+	/// border and under the edge of the window, with the last columns
+	/// unreachable.
+	///
+	/// spec: UPG#the-dashboard
+	test("the plan tables scroll inside their card at a narrow width", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "kamaka" });
+		await runningAt(sql, group.id, "2.58.0");
+		await runningAt(sql, group.id, "2.60.0", "clone");
+		const target = await seedVersion(sql, { major: 2, minor: 61, patch: 0 });
+		// Every column filled, so the table is as wide as it gets in practice.
+		await seedUpgradePlan(sql, {
+			groupId: group.id,
+			targetVersionId: target.id,
+			plannedFor: "2020-01-01",
+			plannedTime: "22:00",
+			plannedEndTime: "02:00",
+			plannedZone: "Pacific/Fiji",
+			note: "site can absorb 2.61 only, and the window is tight",
+		});
+		await seedUpgradePlan(sql, {
+			groupId: group.id,
+			rank: "clone",
+			targetVersionId: target.id,
+			plannedFor: "2020-02-01",
+			note: "clone goes first",
+		});
+		await declareUpgradeReplica(sql, group.id);
+
+		await page.setViewportSize({ width: 900, height: 900 });
+		await page.goto("/upgrades");
+		await expect(page.getByTestId("planned-upgrade-row")).toHaveCount(2);
+
+		const card = page.getByTestId("planned-upgrades");
+		const scroller = card.locator(".MuiTableContainer-root").first();
+		const overflow = await scroller.evaluate((el) => ({
+			scrollWidth: el.scrollWidth,
+			clientWidth: el.clientWidth,
+		}));
+		expect(
+			overflow.scrollWidth,
+			`the table is wider than its scroller, so it scrolls: ${JSON.stringify(overflow)}`,
+		).toBeGreaterThan(overflow.clientWidth);
+
+		// And the card itself stays inside the window: the overflow is absorbed
+		// by the scroller rather than pushing the layout wide.
+		const box = await card.boundingBox();
+		expect(box).not.toBeNull();
+		expect(box!.x + box!.width).toBeLessThanOrEqual(900);
+
+		// Scrolling the container reaches the far side rather than clipping it.
+		await scroller.evaluate((el) => {
+			el.scrollLeft = el.scrollWidth;
+		});
+		expect(await scroller.evaluate((el) => el.scrollLeft)).toBeGreaterThan(0);
+	});
 });
 
 test.describe("upgrade calendar", () => {
@@ -726,6 +817,7 @@ test.describe("upgrade windows", () => {
 			"9am-11:30am",
 		);
 	});
+
 });
 
 /** The local calendar day, as the API and the grid both write it. */

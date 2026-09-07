@@ -76,6 +76,9 @@ test.describe("an incident names the environment it is on", () => {
 		await expect(heading).not.toHaveText(/production/);
 	});
 
+	// The group's name is the page's heading, so an environment reads by its
+	// rank alone here and the group's own incident carries none.
+	// spec: INC#notification
 	test("a group's page presents each environment's incident", async ({
 		page,
 		sql,
@@ -198,6 +201,71 @@ test.describe("an incident names the environment it is on", () => {
 		await expect(
 			page.locator('[data-testid="rank-row"][data-rank="production"]'),
 		).not.toHaveAttribute("data-incident");
+	});
+
+	/// A card is read from across the grid before any row is, so its own mark
+	/// has to stand for the worst thing in the group. A production outage beside
+	/// a test box that has recovered must not read as recovering.
+	///
+	/// spec: CHK#presentation
+	test("the card's mark takes the most serious of its environments", async ({
+		page,
+		sql,
+	}) => {
+		await seedVersion(sql, { major: 1, minor: 0, patch: 0 });
+		const group = await seedServerGroup(sql, { name: "kamaka" });
+		const central = await seedServer(sql, {
+			name: "kamaka-central",
+			type: "tamanu-central",
+			groupId: group.id,
+			rank: "production",
+		});
+		const testBox = await seedServer(sql, {
+			name: "kamaka-test",
+			type: "tamanu-central",
+			groupId: group.id,
+			rank: "test",
+		});
+		const down = await seedIssue(sql, {
+			serverId: central.id,
+			ref: "health/postgres",
+			message: "postgres is down",
+		});
+		await seedIncident(sql, {
+			serverGroupId: group.id,
+			rank: "production",
+			issues: [{ issueId: down.id }],
+		});
+		// The test box's incident is lingering: currently green, and the
+		// quieter of the two states.
+		const recovered = await seedIssue(sql, {
+			serverId: testBox.id,
+			ref: "health/postgres",
+			active: false,
+			message: "was failing, now recovered",
+		});
+		const opened = new Date(Date.now() - 10 * 60_000).toISOString();
+		const cleared = new Date(Date.now() - 2 * 60_000).toISOString();
+		await seedIncident(sql, {
+			serverGroupId: group.id,
+			rank: "test",
+			openedAt: opened,
+			closingAt: cleared,
+			issues: [{ issueId: recovered.id, joinedAt: opened, leftAt: cleared }],
+		});
+
+		await page.goto("/status");
+
+		await expect(page.getByTestId("incident-segment")).toHaveAttribute(
+			"data-loudness",
+			"loud",
+		);
+		await expect(
+			page.locator('[data-testid="rank-row"][data-rank="production"]'),
+		).toHaveAttribute("data-incident", "loud");
+		await expect(
+			page.locator('[data-testid="rank-row"][data-rank="test"]'),
+		).toHaveAttribute("data-incident", "lingering");
 	});
 
 	test("a group's own incident is presented beside its environments'", async ({

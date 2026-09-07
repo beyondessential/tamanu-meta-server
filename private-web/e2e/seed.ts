@@ -1617,6 +1617,9 @@ export async function seedMaintenanceWindow(
 	opts: {
 		machineId?: string;
 		serverGroupId?: string;
+		/** With `serverGroupId`, covers only that group's applications at this
+		 * rank rather than the whole group. */
+		rank?: ServerRank;
 		endsInHours?: number;
 		/** Seed the window already ended this many minutes ago (still inside
 		 * the settle period when under 10). */
@@ -1627,14 +1630,15 @@ export async function seedMaintenanceWindow(
 ): Promise<SeededMaintenanceWindow> {
 	const rows = await sql.query<{ id: string }>(
 		`INSERT INTO maintenance_windows
-		   (machine_id, server_group_id, expected_end, ended_at, note, declared_by)
-		 VALUES ($1, $2, NOW() + make_interval(mins => $3),
-		         CASE WHEN $4::int IS NULL THEN NULL ELSE NOW() - make_interval(mins => $4::int) END,
-		         $5, $6)
+		   (machine_id, server_group_id, rank, expected_end, ended_at, note, declared_by)
+		 VALUES ($1, $2, $3, NOW() + make_interval(mins => $4),
+		         CASE WHEN $5::int IS NULL THEN NULL ELSE NOW() - make_interval(mins => $5::int) END,
+		         $6, $7)
 		 RETURNING id`,
 		[
 			opts.machineId ?? null,
 			opts.serverGroupId ?? null,
+			opts.rank ?? null,
 			opts.endedMinutesAgo != null
 				? -opts.endedMinutesAgo
 				: Math.round((opts.endsInHours ?? 2) * 60),

@@ -420,4 +420,73 @@ test.describe("maintenance windows", () => {
 		await expect(page.getByText("connection refused")).toBeVisible();
 		await expect(page.getByText("Unhealthy")).toBeVisible();
 	});
+
+	/// An operator mid-cutover moves between four surfaces, and the property is
+	/// that each one carries the failure and the maintenance mark together: a
+	/// page showing only the failure reads as an alert nobody has answered, and
+	/// one showing only the mark hides the check being fixed. Asserted on every
+	/// surface from one state, since a regression tends to take one of them.
+	///
+	// spec: MNT#presentation
+	test("the failure and the maintenance mark read together on every surface", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "mid-cutover" });
+		const failing = await seedServer(sql, {
+			name: "failing-on-purpose",
+			rank: "production",
+			groupId: group.id,
+		});
+		const healthy = await seedServer(sql, {
+			name: "fine-on-purpose",
+			rank: "production",
+			groupId: group.id,
+		});
+		await seedMaintenanceWindow(sql, {
+			machineId: failing.machineId,
+			note: "Cutting over the database",
+		});
+		await seedStatus(sql, {
+			serverId: failing.id,
+			healthy: false,
+			health: [
+				{ check: "database", healthy: false, message: "connection refused" },
+			],
+		});
+		await seedStatus(sql, { serverId: healthy.id, healthy: true });
+
+		// The box the workload runs on.
+		await page.goto(`/fleet/machines/${failing.machineId}`);
+		await expect(page.getByTestId("maintenance-marker")).toContainText(
+			"Under maintenance",
+		);
+		await expect(page.getByTestId("maintenance-section")).toBeVisible();
+
+		// The group, where the tree draws the box around its workloads. A
+		// machine's own window is not one the group's maintenance section
+		// lists, so the enclosure's mark is what carries it here.
+		await page.goto(`/fleet/groups/${group.id}`);
+		const enclosure = page
+			.getByTestId("group-tree")
+			.locator("[data-maintenance='holding']");
+		await expect(enclosure).toHaveCount(1);
+		// The enclosure holds dots rather than text, so its label is where the
+		// two facts sit side by side.
+		// The enclosure names the box, its health and the window, then the
+		// applications on it, all in the one tooltip.
+		await expect(enclosure).toHaveAttribute(
+			"aria-label",
+			/failing-on-purpose .* under maintenance/,
+		);
+
+		// The grid, where one box of the two is hatched and the other is not.
+		// The dot's colour comes from the health the card reports, which is
+		// asserted where it can actually regress: see the private-server test
+		// `a_failing_box_under_a_window_still_reports_its_own_health`.
+		await page.goto("/status");
+		const card = page.locator(`a[href="/fleet/groups/${group.id}"]`).first();
+		await expect(card.locator("[data-maintenance='holding']")).toHaveCount(1);
+		await expect(card.getByTestId("status-dot")).toHaveCount(2);
+	});
 });
