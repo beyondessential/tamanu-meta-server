@@ -660,9 +660,9 @@ pub async fn create_artifact(
 		(Some(_), Some(encoded)) => {
 			let bytes = BASE64_STANDARD
 				.decode(encoded)
-				.map_err(|_| AppError::custom("content_base64 is not valid base64"))?;
+				.map_err(|_| AppError::BadRequest("content_base64 is not valid base64".into()))?;
 			if bytes.len() > MAX_HELD_ARTIFACT_BYTES {
-				return Err(AppError::custom(format!(
+				return Err(AppError::BadRequest(format!(
 					"artifact is larger than the {MAX_HELD_ARTIFACT_BYTES} byte limit"
 				)));
 			}
@@ -670,21 +670,31 @@ pub async fn create_artifact(
 			(Some(bytes), Some(digest))
 		}
 		(Some(_), None) => {
-			return Err(AppError::custom(
-				"a group-scoped artifact must carry its bytes",
+			return Err(AppError::BadRequest(
+				"a group-scoped artifact must carry its bytes".into(),
 			));
 		}
 		(None, Some(_)) => {
-			return Err(AppError::custom(
-				"only a group-scoped artifact carries bytes",
+			return Err(AppError::BadRequest(
+				"only a group-scoped artifact carries bytes".into(),
 			));
 		}
 		(None, None) => (None, None),
 	};
 
+	// An artifact rests in one place or the other, so a registration naming a
+	// group and a location together is refused rather than written and caught
+	// by the constraint.
+	// spec: ART#where-an-artifact-rests
+	if args.group_id.is_some() && args.download_url.is_some() {
+		return Err(AppError::BadRequest(
+			"an artifact Canopy holds has no download URL".into(),
+		));
+	}
+
 	if args.group_id.is_none() && args.download_url.is_none() {
-		return Err(AppError::custom(
-			"an artifact needs a download URL or a group",
+		return Err(AppError::BadRequest(
+			"an artifact needs a download URL or a group".into(),
 		));
 	}
 

@@ -650,8 +650,8 @@ async fn download_artifact(
 	let version = latest_matching_ready(&mut db, version.0).await?;
 	let scope = caller_scope(&mut db, device).await?;
 
-	let artifact_uuid =
-		Uuid::parse_str(&artifact_id).map_err(|_| AppError::custom("Invalid artifact ID"))?;
+	let artifact_uuid = Uuid::parse_str(&artifact_id)
+		.map_err(|_| AppError::BadRequest("Invalid artifact ID".into()))?;
 
 	// Resolution is what enforces the boundary: an artifact scoped to a group
 	// this caller is not offered is simply not in the set, so it is missing in
