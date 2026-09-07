@@ -270,3 +270,61 @@ async fn a_blank_download_url_is_not_a_location() {
 	})
 	.await
 }
+
+/// The create route carries a body limit sized from the held-bytes cap, so an
+/// upload well past axum's 2 MB default is accepted, and one past the cap is
+/// refused by the handler naming the limit rather than by axum with a
+/// plain-text 413 the SPA has nothing structured to render.
+// spec: ART#where-an-artifact-rests
+#[tokio::test(flavor = "multi_thread")]
+async fn an_upload_over_the_limit_is_told_what_it_is() {
+	commons_tests::server::run(async |mut conn, _public, private| {
+		let version = "ffffffff-0000-0000-0000-ffffffffffff";
+		let group = "ffffffff-1111-1111-1111-ffffffffffff";
+
+		conn.batch_execute(&format!(
+			"INSERT INTO versions (id, major, minor, patch, changelog, status)
+			 VALUES ('{version}', 2, 60, 0, '', 'published');
+			 INSERT INTO server_groups (id, name) VALUES ('{group}', 'kamaka')",
+		))
+		.await
+		.unwrap();
+
+		// "AAAA" decodes to three zero bytes, so the repeat count sets the size.
+		let four_mib = "A".repeat(4 * (4 * 1024 * 1024 / 3));
+		let accepted = private
+			.post("/api/versions/create_artifact")
+			.json(&serde_json::json!({
+				"version_id": version,
+				"artifact_type": "reporting-schema",
+				"platform": "any",
+				"group_id": group,
+				"content_base64": four_mib,
+			}))
+			.await;
+		accepted.assert_status_ok();
+
+		let over_limit = "A".repeat(4 * (32 * 1024 * 1024 / 3 + 1));
+		let refused = private
+			.post("/api/versions/create_artifact")
+			.json(&serde_json::json!({
+				"version_id": version,
+				"artifact_type": "reporting-schema",
+				"platform": "linux",
+				"group_id": group,
+				"content_base64": over_limit,
+			}))
+			.await;
+
+		assert_eq!(refused.status_code(), axum::http::StatusCode::BAD_REQUEST);
+		let problem: serde_json::Value = refused.json();
+		assert!(
+			problem["title"]
+				.as_str()
+				.expect("a problem-details title")
+				.contains("32 MiB"),
+			"the refusal names the limit, but got: {problem}"
+		);
+	})
+	.await
+}

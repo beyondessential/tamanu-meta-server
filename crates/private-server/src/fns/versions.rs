@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::str::FromStr;
 
 use axum::Json;
-use axum::extract::State;
+use axum::extract::{DefaultBodyLimit, State};
 use base64::{Engine as _, prelude::BASE64_STANDARD};
 use canopy_utoipa_axum::{router::OpenApiRouter, routes};
 use commons_errors::{AppError, ProblemDetailsSchema, Result};
@@ -25,6 +25,11 @@ use crate::state::AppState;
 /// SQL file; anything approaching this is not one, and the rows live in
 /// Postgres alongside everything else.
 const MAX_HELD_ARTIFACT_BYTES: usize = 32 * 1024 * 1024;
+
+/// Body budget for `create_artifact`. Base64 inflates the bytes by a third, and
+/// sizing above that keeps an over-limit upload the handler's structured
+/// refusal rather than axum's plain-text 413.
+const MAX_CREATE_ARTIFACT_BODY_BYTES: usize = MAX_HELD_ARTIFACT_BYTES / 3 * 4 + 64 * 1024;
 
 /// A single released (or draft) software version.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
@@ -224,7 +229,11 @@ pub fn routes() -> OpenApiRouter<AppState> {
 		.routes(routes!(update_version_status))
 		.routes(routes!(update_version_changelog))
 		.routes(routes!(update_artifact))
-		.routes(routes!(create_artifact))
+		.merge(
+			OpenApiRouter::new()
+				.routes(routes!(create_artifact))
+				.layer(DefaultBodyLimit::max(MAX_CREATE_ARTIFACT_BODY_BYTES)),
+		)
 		.routes(routes!(delete_artifact))
 		.routes(routes!(list_known_issues))
 		.routes(routes!(add_known_issue))
@@ -663,7 +672,8 @@ pub async fn create_artifact(
 				.map_err(|_| AppError::BadRequest("content_base64 is not valid base64".into()))?;
 			if bytes.len() > MAX_HELD_ARTIFACT_BYTES {
 				return Err(AppError::BadRequest(format!(
-					"artifact is larger than the {MAX_HELD_ARTIFACT_BYTES} byte limit"
+					"artifact is larger than the {} MiB limit",
+					MAX_HELD_ARTIFACT_BYTES / (1024 * 1024)
 				)));
 			}
 			let digest = digest_of(&bytes);
