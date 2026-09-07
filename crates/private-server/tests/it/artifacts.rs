@@ -173,3 +173,48 @@ async fn an_unscoped_artifact_cannot_lose_its_location() {
 	})
 	.await
 }
+
+/// An operator registers a group-scoped artifact by carrying its bytes. Canopy
+/// holds them, takes the digest of what it received, and offers the group's
+/// name back so the operator can see whose it is.
+// spec: ART#where-an-artifact-rests, ART#digests
+#[tokio::test(flavor = "multi_thread")]
+async fn an_operator_registers_a_group_scoped_artifact() {
+	commons_tests::server::run(async |mut conn, _public, private| {
+		let version = "bbbbbbbb-0000-0000-0000-bbbbbbbbbbbb";
+		let group = "cccccccc-0000-0000-0000-cccccccccccc";
+
+		conn.batch_execute(&format!(
+			"INSERT INTO versions (id, major, minor, patch, changelog, status)
+			 VALUES ('{version}', 2, 60, 0, '', 'published');
+			 INSERT INTO server_groups (id, name) VALUES ('{group}', 'kamaka')",
+		))
+		.await
+		.unwrap();
+
+		// "kamaka schema" — the digest asserted below is of exactly these bytes.
+		let response = private
+			.post("/api/versions/create_artifact")
+			.json(&serde_json::json!({
+				"version_id": version,
+				"artifact_type": "reporting-schema",
+				"platform": "any",
+				"group_id": group,
+				"content_base64": "a2FtYWthIHNjaGVtYQ==",
+				"content_type": "application/sql",
+			}))
+			.await;
+		response.assert_status_ok();
+
+		let artifact: serde_json::Value = response.json();
+		assert_eq!(artifact["canopy_holds_bytes"], true);
+		assert!(artifact["download_url"].is_null(), "it rests in Canopy");
+		assert_eq!(artifact["group_id"], group);
+		assert_eq!(artifact["group_name"], "kamaka");
+		assert_eq!(
+			artifact["digest"],
+			database::artifacts::digest_of(b"kamaka schema")
+		);
+	})
+	.await
+}

@@ -478,3 +478,117 @@ async fn registering_again_over_the_wire_replaces() {
 	)
 	.await
 }
+
+/// A credential Canopy cannot place is anonymous rather than refused, so a
+/// deactivated key still reads the unscoped artifacts instead of failing a path
+/// that serves everyone. The same credential registering is still a refusal:
+/// the downgrade widens nothing.
+// spec: ART#who-is-offered-a-group-scoped-artifact
+#[tokio::test(flavor = "multi_thread")]
+async fn a_deactivated_key_reads_as_anonymous_and_still_cannot_register() {
+	commons_tests::server::run_with_device_auth(
+		"releaser",
+		async |mut conn, cert, device_id, public, _| {
+			seed(&mut conn).await;
+			enrol(&mut conn, device_id, GROUP_A).await;
+
+			conn.batch_execute(&format!(
+				"UPDATE device_keys SET is_active = false WHERE device_id = '{device_id}'"
+			))
+			.await
+			.expect("deactivate the key");
+
+			// The read still answers, with the unscoped set rather than group A's.
+			let response = public
+				.get("/versions/2.60.0/artifacts")
+				.add_header("x-forwarded-client-cert", &format!("Cert={cert}"))
+				.await;
+			response.assert_status_ok();
+			let artifacts: Vec<serde_json::Value> = response.json();
+			assert_eq!(artifacts.len(), 1);
+			assert_eq!(artifacts[0]["id"], UNSCOPED);
+
+			// Registering with the same credential is refused: a path that
+			// needs an identity does not accept one Canopy cannot place.
+			let refused = public
+				.post("/artifacts/2.60.0/installer/windows")
+				.add_header("x-forwarded-client-cert", &format!("Cert={cert}"))
+				.text("https://example.com/x.exe")
+				.await;
+			assert_eq!(refused.status_code(), StatusCode::UNAUTHORIZED);
+		},
+	)
+	.await
+}
+
+/// The media type a registration recorded is what the bytes are served as, and
+/// an artifact registered without one is served as opaque bytes rather than
+/// guessed at.
+// spec: ART#where-an-artifact-rests
+#[tokio::test(flavor = "multi_thread")]
+async fn held_bytes_are_served_as_the_type_they_were_registered_with() {
+	commons_tests::server::run_with_device_auth(
+		"machine",
+		async |mut conn, cert, device_id, public, _| {
+			seed(&mut conn).await;
+			enrol(&mut conn, device_id, GROUP_A).await;
+
+			let typed = public
+				.get(&format!("/versions/2.60.0/artifacts/{THEIRS}/download"))
+				.add_header("x-forwarded-client-cert", &format!("Cert={cert}"))
+				.await;
+			assert_eq!(
+				typed.header("content-type").to_str().unwrap(),
+				"application/sql"
+			);
+
+			conn.batch_execute(&format!(
+				"UPDATE artifacts SET content_type = NULL WHERE id = '{THEIRS}'"
+			))
+			.await
+			.expect("drop the media type");
+
+			let untyped = public
+				.get(&format!("/versions/2.60.0/artifacts/{THEIRS}/download"))
+				.add_header("x-forwarded-client-cert", &format!("Cert={cert}"))
+				.await;
+			assert_eq!(
+				untyped.header("content-type").to_str().unwrap(),
+				"application/octet-stream"
+			);
+		},
+	)
+	.await
+}
+
+/// An operator device registers either kind, but the group-scoped path is not
+/// reachable from this endpoint at all, so an admin naming a group is refused
+/// exactly as a releaser is. Publishing into a group is the private server's.
+// spec: ART#registration
+#[tokio::test(flavor = "multi_thread")]
+async fn an_admin_device_cannot_register_for_a_group_here_either() {
+	commons_tests::server::run_with_device_auth(
+		"admin",
+		async |mut conn, cert, _device_id, public, _| {
+			seed(&mut conn).await;
+
+			let refused = public
+				.post(&format!(
+					"/artifacts/2.60.0/reporting-schema/any?group={GROUP_A}"
+				))
+				.add_header("x-forwarded-client-cert", &format!("Cert={cert}"))
+				.text("https://example.com/x.sql")
+				.await;
+			assert_eq!(refused.status_code(), StatusCode::FORBIDDEN);
+
+			// Unscoped, the same admin credential registers fine.
+			let accepted = public
+				.post("/artifacts/2.60.0/installer/windows")
+				.add_header("x-forwarded-client-cert", &format!("Cert={cert}"))
+				.text("https://example.com/x.exe")
+				.await;
+			accepted.assert_status_ok();
+		},
+	)
+	.await
+}

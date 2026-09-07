@@ -612,3 +612,51 @@ async fn deleting_a_group_takes_its_artifacts() {
 	})
 	.await;
 }
+
+/// An unscoped exact artifact replaces itself too. Its key carries a NULL range
+/// pattern and a NULL group, which the default treatment of NULL would have
+/// made distinct from the row already there.
+// spec: ART#registration
+#[tokio::test(flavor = "multi_thread")]
+async fn an_unscoped_exact_artifact_replaces_itself() {
+	TestDb::run(|mut conn, _url| async move {
+		let version = seed_version(&mut conn, 2, 60, 0).await;
+
+		let first = Artifact::register(&mut conn, unscoped(version, "installer", "https://x/one"))
+			.await
+			.expect("first");
+		let second = Artifact::register(&mut conn, unscoped(version, "installer", "https://x/two"))
+			.await
+			.expect("second");
+
+		assert_eq!(first.id, second.id);
+		assert_eq!(second.download_url.as_deref(), Some("https://x/two"));
+
+		let all = Artifact::get_for_version_all_matches(&mut conn, version, Scope::Fleet)
+			.await
+			.expect("operator view");
+		assert_eq!(all.len(), 1);
+	})
+	.await;
+}
+
+/// A group's name is shown whatever state the group is in, so a reference to an
+/// archived group still reads as that group rather than as nothing.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_archived_group_is_still_named() {
+	TestDb::run(|mut conn, _url| async move {
+		let theirs = seed_group(&mut conn, "kamaka").await;
+
+		conn.batch_execute(&format!(
+			"UPDATE server_groups SET deleted_at = now() WHERE id = '{theirs}'"
+		))
+		.await
+		.expect("archive the group");
+
+		let names = database::server_groups::ServerGroup::names_by_id(&mut conn)
+			.await
+			.expect("names");
+		assert_eq!(names.get(&theirs).map(String::as_str), Some("kamaka"));
+	})
+	.await;
+}
