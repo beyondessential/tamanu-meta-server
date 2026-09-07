@@ -13,7 +13,7 @@ import {
 } from "@mui/material";
 import { useEffect, useState } from "react";
 import { useApiAction } from "../api";
-import type { MaintenanceWindow, ServerRank } from "../types";
+import type { MaintenanceScope, MaintenanceWindow, ServerRank } from "../types";
 
 const PRESETS = [1, 2, 4, 8];
 
@@ -28,10 +28,10 @@ function hoursFromNow(hours: number): string {
 	return toLocalInput(new Date(Date.now() + hours * 3600_000));
 }
 
-/** Declare a maintenance window over a machine, a group, or one of a group's
- * environments, or amend the one it already has. Everything on the target
- * grades to skipped while the window holds, so nothing on it opens or joins
- * an incident. */
+/** Declare a maintenance window over an application, a machine, a group, or one
+ * of a group's environments, or amend the one it already has. Everything on the
+ * target grades to skipped while the window holds, so nothing on it opens or
+ * joins an incident. */
 export default function DeclareMaintenanceDialog({
 	open,
 	onClose,
@@ -45,7 +45,7 @@ export default function DeclareMaintenanceDialog({
 }: {
 	open: boolean;
 	onClose: () => void;
-	scope: "machine" | "group";
+	scope: MaintenanceScope;
 	id: string;
 	/** With a group, narrows the window to the machines serving the group's
 	 * applications at this rank. */
@@ -76,9 +76,11 @@ export default function DeclareMaintenanceDialog({
 		if (Number.isNaN(at.getTime())) return;
 		try {
 			await declare.call({
-				...(scope === "machine"
-					? { machine_id: id }
-					: { server_group_id: id, rank: rank ?? existing?.rank ?? null }),
+				...(scope === "application"
+					? { application_id: id }
+					: scope === "machine"
+						? { machine_id: id }
+						: { server_group_id: id, rank: rank ?? existing?.rank ?? null }),
 				expected_end: at.toISOString(),
 				note: note.trim() === "" ? null : note.trim(),
 			});
@@ -102,7 +104,9 @@ export default function DeclareMaintenanceDialog({
 						? `Every check on the group's ${rank} machines is suspended: nothing opens or joins an incident, and nothing notifies. The rest of the group stays watched.`
 						: scope === "group"
 							? "Every check on this group and its machines is suspended: nothing opens or joins an incident, and nothing notifies."
-							: "Every check on this machine and the applications on it is suspended: nothing opens or joins an incident, and nothing notifies."}{" "}
+							: scope === "machine"
+								? "Every check on this machine and the applications on it is suspended: nothing opens or joins an incident, and nothing notifies."
+								: "Every check on this application is suspended: nothing opens or joins an incident, and nothing notifies. The machine it runs on, and anything else on it, stays watched."}{" "}
 					The window ends itself at the time below, and watching resumes a
 					few minutes later once the reporters have been heard from.
 				</DialogContentText>

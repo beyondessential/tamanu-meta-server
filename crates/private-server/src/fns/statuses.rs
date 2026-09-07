@@ -325,6 +325,13 @@ pub async fn group_details(
 					.get(&s.machine_id)
 					.copied()
 					.unwrap_or_default(),
+				maintained: suspended.suspends_application(s.id, s.machine_id, s.group_id),
+				own_window: suspended.application_window(s.id),
+				maintenance_settling: suspended.settling_application(
+					s.id,
+					s.machine_id,
+					s.group_id,
+				),
 				machine_maintained: suspended.suspends(s.machine_id, s.group_id),
 				machine_maintenance_settling: suspended.settling(s.machine_id, s.group_id),
 				machine_own_window: suspended.machine_window(s.machine_id),

@@ -5774,8 +5774,8 @@
         "tags": [
           "maintenance"
         ],
-        "summary": "Declare that a machine, a group, or one of a group's environments is being\nworked on.",
-        "description": "Every check on the target grades to skipped while the window holds and\nfor a settle period after it ends, so nothing on it opens or joins an\nincident. Issues already in an open incident leave it, closing the\nincident where nothing else holds it open. A target that already has an\nopen window has that window amended rather than a second opened.\nRequires admin access.",
+        "summary": "Declare that an application, a machine, a group, or one of a group's\nenvironments is being worked on.",
+        "description": "Every check on the target grades to skipped while the window holds and\nfor a settle period after it ends, so nothing on it opens or joins an\nincident. A window over one application leaves the rest of the box\nwatched; one over the machine covers everything on it. Issues already in an open incident leave it, closing the\nincident where nothing else holds it open. A target that already has an\nopen window has that window amended rather than a second opened.\nRequires admin access.",
         "operationId": "declare",
         "requestBody": {
           "content": {
@@ -10075,6 +10075,14 @@
           "expected_end"
         ],
         "properties": {
+          "application_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The application, for a window over one workload. Covers that\napplication and nothing else on the box it runs on."
+          },
           "expected_end": {
             "type": "string",
             "format": "date-time",
@@ -10571,6 +10579,9 @@
           "machine_id",
           "machine_up",
           "machine_health",
+          "maintained",
+          "own_window",
+          "maintenance_settling",
           "machine_maintained",
           "machine_own_window",
           "machine_maintenance_settling"
@@ -10600,7 +10611,7 @@
           },
           "machine_maintained": {
             "type": "boolean",
-            "description": "Whether a maintenance window suspends this box — its own or its\ngroup's. A window is declared over a machine and never over an\napplication, so this is the box's fact and the applications on it are\nsuspended by it rather than carrying one of their own."
+            "description": "Whether a maintenance window suspends the box this runs on, its own or\none reaching it through its environment or its group."
           },
           "machine_maintenance_settling": {
             "type": "boolean",
@@ -10621,6 +10632,14 @@
             "$ref": "#/components/schemas/ShortStatus",
             "description": "The box's own reachability, which is not this application's: a machine\nthat has gone quiet takes everything on it with it, and one that is fine\nsays nothing about whether the software on it is."
           },
+          "maintained": {
+            "type": "boolean",
+            "description": "Whether a maintenance window suspends this application, by naming it or\nby covering the box it runs on."
+          },
+          "maintenance_settling": {
+            "type": "boolean",
+            "description": "Whether every window covering this application has ended and it is\nserving out the settle period."
+          },
           "name": {
             "type": "string",
             "description": "Name of the server."
@@ -10631,6 +10650,10 @@
               "$ref": "#/components/schemas/OperatorPresence"
             },
             "description": "People currently connected to this server, from its latest status\nupdate. Always empty unless the server is actively reporting (`up`\nor `blip`) — a stale report can't be trusted to reflect who is\nconnected right now."
+          },
+          "own_window": {
+            "type": "boolean",
+            "description": "Whether the window suspending it was declared over this application in\nparticular. A window reaching it through its box is marked at that\ngrain, so the dot stays plain."
           },
           "rank": {
             "oneOf": [
@@ -13163,7 +13186,7 @@
       },
       "MaintenanceWindow": {
         "type": "object",
-        "description": "A declaration that a machine, a group, or one of a group's environments is\nbeing worked on.",
+        "description": "A declaration that an application, a machine, a group, or one of a group's\nenvironments is being worked on.",
         "required": [
           "id",
           "expected_end",
@@ -13186,6 +13209,14 @@
               "null"
             ],
             "description": "The operator who last amended the window, where one has."
+          },
+          "application_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Set for a window over one application, covering that application's\nchecks and nothing else on the box it runs on."
           },
           "created_at": {
             "type": "string",
@@ -13823,7 +13854,7 @@
                     "boolean",
                     "null"
                   ],
-                  "description": "Whether a maintenance window suspends this server, its own or its\ngroup's. Set alongside `up` and `health` by the endpoints that\ndecorate listings; `None` where they aren't."
+                  "description": "Whether a maintenance window suspends this server, its own or one over\nthe box it runs on. Set alongside `up` and `health` by the endpoints\nthat decorate listings; `None` where they aren't."
                 },
                 "may_manage_dns": {
                   "type": "boolean",
@@ -13843,6 +13874,13 @@
                 "notes": {
                   "type": "string",
                   "description": "Free-text operator notes about the server."
+                },
+                "own_window": {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ],
+                  "description": "Whether that window was declared over this application in particular.\nOne reaching it through its box is marked on the box."
                 },
                 "public_name": {
                   "type": [
@@ -16494,7 +16532,7 @@
               "boolean",
               "null"
             ],
-            "description": "Whether a maintenance window suspends this server, its own or its\ngroup's. Set alongside `up` and `health` by the endpoints that\ndecorate listings; `None` where they aren't."
+            "description": "Whether a maintenance window suspends this server, its own or one over\nthe box it runs on. Set alongside `up` and `health` by the endpoints\nthat decorate listings; `None` where they aren't."
           },
           "may_manage_dns": {
             "type": "boolean",
@@ -16514,6 +16552,13 @@
           "notes": {
             "type": "string",
             "description": "Free-text operator notes about the server."
+          },
+          "own_window": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Whether that window was declared over this application in particular.\nOne reaching it through its box is marked on the box."
           },
           "public_name": {
             "type": [
@@ -17572,8 +17617,16 @@
       },
       "TargetArgs": {
         "type": "object",
-        "description": "The target a window covers: exactly one of the two ids is set.",
+        "description": "The target a window covers: exactly one of the ids is set.",
         "properties": {
+          "application_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The application, for a window over one workload. Covers that\napplication and nothing else on the box it runs on."
+          },
           "machine_id": {
             "type": [
               "string",

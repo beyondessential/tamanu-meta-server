@@ -286,7 +286,7 @@ pub async fn get_detail(
 	// application on it is judged by, since taking the box down stops the
 	// workload too.
 	let maintained =
-		MaintenanceWindow::suspends(&mut conn, Some(machine.id), machine.group_id).await?;
+		MaintenanceWindow::suspends(&mut conn, None, Some(machine.id), machine.group_id).await?;
 	let maintenance_settling = maintained && {
 		let mut open = MaintenanceWindow::open_for(&mut conn, Scope::Machine(machine.id), None)
 			.await?

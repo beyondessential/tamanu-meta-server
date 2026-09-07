@@ -2921,11 +2921,12 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Declare that a machine, a group, or one of a group's environments is being
-         *     worked on.
+         * Declare that an application, a machine, a group, or one of a group's
+         *     environments is being worked on.
          * @description Every check on the target grades to skipped while the window holds and
          *     for a settle period after it ends, so nothing on it opens or joins an
-         *     incident. Issues already in an open incident leave it, closing the
+         *     incident. A window over one application leaves the rest of the box
+         *     watched; one over the machine covers everything on it. Issues already in an open incident leave it, closing the
          *     incident where nothing else holds it open. A target that already has an
          *     open window has that window amended rather than a second opened.
          *     Requires admin access.
@@ -5441,6 +5442,12 @@ export interface components {
         /** @description Declare a window over a target, or amend the one it already has. */
         DeclareArgs: {
             /**
+             * Format: uuid
+             * @description The application, for a window over one workload. Covers that
+             *     application and nothing else on the box it runs on.
+             */
+            application_id?: string | null;
+            /**
              * Format: date-time
              * @description When the work is expected to finish. The window ends itself then.
              */
@@ -5748,10 +5755,8 @@ export interface components {
              */
             machine_id: string;
             /**
-             * @description Whether a maintenance window suspends this box — its own or its
-             *     group's. A window is declared over a machine and never over an
-             *     application, so this is the box's fact and the applications on it are
-             *     suspended by it rather than carrying one of their own.
+             * @description Whether a maintenance window suspends the box this runs on, its own or
+             *     one reaching it through its environment or its group.
              */
             machine_maintained: boolean;
             /**
@@ -5775,6 +5780,16 @@ export interface components {
              *     says nothing about whether the software on it is.
              */
             machine_up: components["schemas"]["ShortStatus"];
+            /**
+             * @description Whether a maintenance window suspends this application, by naming it or
+             *     by covering the box it runs on.
+             */
+            maintained: boolean;
+            /**
+             * @description Whether every window covering this application has ended and it is
+             *     serving out the settle period.
+             */
+            maintenance_settling: boolean;
             /** @description Name of the server. */
             name: string;
             /**
@@ -5784,6 +5799,12 @@ export interface components {
              *     connected right now.
              */
             operators: components["schemas"]["OperatorPresence"][];
+            /**
+             * @description Whether the window suspending it was declared over this application in
+             *     particular. A window reaching it through its box is marked at that
+             *     grain, so the dot stays plain.
+             */
+            own_window: boolean;
             rank?: null | components["schemas"]["ServerRank"];
             /** @description The application the server runs, presented alongside its role. */
             type: components["schemas"]["ApplicationType"];
@@ -7433,8 +7454,8 @@ export interface components {
          */
         MaintenanceKind: "quick" | "full";
         /**
-         * @description A declaration that a machine, a group, or one of a group's environments is
-         *     being worked on.
+         * @description A declaration that an application, a machine, a group, or one of a group's
+         *     environments is being worked on.
          */
         MaintenanceWindow: {
             /**
@@ -7444,6 +7465,12 @@ export interface components {
             amended_at?: string | null;
             /** @description The operator who last amended the window, where one has. */
             amended_by?: string | null;
+            /**
+             * Format: uuid
+             * @description Set for a window over one application, covering that application's
+             *     checks and nothing else on the box it runs on.
+             */
+            application_id?: string | null;
             /**
              * Format: date-time
              * @description When this record was created.
@@ -7822,9 +7849,9 @@ export interface components {
                  */
                 machine_id: string;
                 /**
-                 * @description Whether a maintenance window suspends this server, its own or its
-                 *     group's. Set alongside `up` and `health` by the endpoints that
-                 *     decorate listings; `None` where they aren't.
+                 * @description Whether a maintenance window suspends this server, its own or one over
+                 *     the box it runs on. Set alongside `up` and `health` by the endpoints
+                 *     that decorate listings; `None` where they aren't.
                  */
                 maintained?: boolean | null;
                 /**
@@ -7841,6 +7868,11 @@ export interface components {
                 name?: string | null;
                 /** @description Free-text operator notes about the server. */
                 notes: string;
+                /**
+                 * @description Whether that window was declared over this application in particular.
+                 *     One reaching it through its box is marked on the box.
+                 */
+                own_window?: boolean | null;
                 /**
                  * @description Name this server appears under in the public mobile-app server list.
                  *     `None` means the server is not listed publicly.
@@ -9564,9 +9596,9 @@ export interface components {
              */
             machine_id: string;
             /**
-             * @description Whether a maintenance window suspends this server, its own or its
-             *     group's. Set alongside `up` and `health` by the endpoints that
-             *     decorate listings; `None` where they aren't.
+             * @description Whether a maintenance window suspends this server, its own or one over
+             *     the box it runs on. Set alongside `up` and `health` by the endpoints
+             *     that decorate listings; `None` where they aren't.
              */
             maintained?: boolean | null;
             /**
@@ -9583,6 +9615,11 @@ export interface components {
             name?: string | null;
             /** @description Free-text operator notes about the server. */
             notes: string;
+            /**
+             * @description Whether that window was declared over this application in particular.
+             *     One reaching it through its box is marked on the box.
+             */
+            own_window?: boolean | null;
             /**
              * @description Name this server appears under in the public mobile-app server list.
              *     `None` means the server is not listed publicly.
@@ -10244,8 +10281,14 @@ export interface components {
             /** @description The tailnet (Tailscale network) this node belongs to. */
             tailnet: string;
         };
-        /** @description The target a window covers: exactly one of the two ids is set. */
+        /** @description The target a window covers: exactly one of the ids is set. */
         TargetArgs: {
+            /**
+             * Format: uuid
+             * @description The application, for a window over one workload. Covers that
+             *     application and nothing else on the box it runs on.
+             */
+            application_id?: string | null;
             /**
              * Format: uuid
              * @description The machine, for a window over one box. Covers every application on it.

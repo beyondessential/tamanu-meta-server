@@ -272,8 +272,8 @@ A group's own incident has no environment to mark and is carried by the mark for
 That mark stands for whichever of its environments is in trouble, so a group with an incident anywhere in it reads as such before any environment is read.
 Where several of its environments have an incident at once, the group's mark takes the state of the most serious of them.
 
-A maintenance window is declared over a machine or a group and never over an application, so wherever a box is drawn its enclosure carries the window (see [MNT](maintenance.md)).
-Where only applications are drawn, each covered application carries it instead — that is the window's consequence for that application rather than a window of its own.
+A maintenance window is declared over an application, a machine, a group, or one of a group's environments (see [MNT](maintenance.md)), and is marked where that grain is drawn: an application's window on its mark, a machine's on its enclosure.
+Where a window reaches a target it was not declared over, that target is muted without taking the mark, the window's consequence for it rather than a window of its own.
 A window's mark is distinguished from the mark for a target nobody is watching, so deliberate, temporary work does not read as neglect.
 
 ## Operator controls

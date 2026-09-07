@@ -275,6 +275,57 @@ test.describe("status page", () => {
 		).toBeVisible();
 	});
 
+	/// A box serving two products is worked on one product at a time, so the
+	/// mark belongs on the dot rather than on the box that carries both.
+	///
+	/// spec: MNT#presentation
+	test("an application under its own window is marked on its dot", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "one-product-window" });
+		const worked = await seedServer(sql, {
+			name: "aaa-being-upgraded",
+			rank: "production",
+			groupId: group.id,
+		});
+		await seedServer(sql, {
+			name: "bbb-left-serving",
+			rank: "production",
+			groupId: group.id,
+			machineId: worked.machineId,
+		});
+		await seedMaintenanceWindow(sql, {
+			applicationId: worked.id,
+			endsInHours: 2,
+		});
+
+		await page.goto("/status");
+
+		const pill = page
+			.locator(`a[href="/fleet/groups/${group.id}"]`)
+			.first()
+			.getByTestId("dot-strip")
+			.locator("[data-testid='rank-row'] > span")
+			.first();
+		// One box, two workloads, one of them declared over.
+		const dots = pill.getByTestId("status-dot");
+		await expect(dots).toHaveCount(2);
+		await expect(dots.nth(0)).toHaveAttribute("data-maintenance", "holding");
+		await expect(dots.nth(1)).not.toHaveAttribute("data-maintenance");
+		// The mark is the dot's own, so the box carrying both stays plain: the
+		// machine is not being taken down.
+		await expect(pill).not.toHaveAttribute("data-maintenance");
+
+		// The cut is the window's own, which runs the other way from the one
+		// marking a target nobody is watching.
+		const cuts = await dots.evaluateAll((els) =>
+			els.map((el) => getComputedStyle(el).maskImage),
+		);
+		expect(cuts[0]).toContain("45deg");
+		expect(cuts[1]).not.toContain("45deg");
+	});
+
 	/// Suspension outlasts the window by the settle period, so a box stays
 	/// marked after its window is lifted. The mark says which of the two it is,
 	/// or a lift that has taken reads as one that has not.
@@ -348,7 +399,9 @@ test.describe("status page", () => {
 			page.getByText(/Under maintenance, raising nothing/),
 		).toBeVisible();
 		await expect(
-			page.getByText(/a machine's icon, an environment's row, or a group's card/),
+			page.getByText(
+				/an application's dot, a machine's icon, an environment's row, or a group's card/,
+			),
 		).toBeVisible();
 		const swatches = await page
 			.locator("[data-maintenance]")

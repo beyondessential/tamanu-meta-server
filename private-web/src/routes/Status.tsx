@@ -757,6 +757,12 @@ export function RankedDotStrip({
 											up={m.up}
 											health={m.health}
 											monitored={m.is_monitored}
+											maintained={m.own_window}
+											settling={m.maintenance_settling}
+											// The enclosure mutes everything on a box
+											// under a window, so a dot mutes itself
+											// only where the window is its own.
+											dim={m.maintained && !m.machine_maintained}
 											size={DOT_SIZE}
 										/>
 									</Box>

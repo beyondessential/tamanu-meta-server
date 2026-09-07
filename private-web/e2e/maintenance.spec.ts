@@ -76,7 +76,7 @@ test.describe("maintenance windows", () => {
 		const group = await seedServerGroup(sql, { name: "back-already" });
 		const server = await seedServer(sql, { name: "done", groupId: group.id });
 		await seedStatus(sql, { serverId: server.id, healthy: true });
-		await seedMaintenanceWindow(sql, { machineId: server.machineId, note: "Rebooting" });
+		await seedMaintenanceWindow(sql, { applicationId: server.id, note: "Rebooting" });
 
 		await page.goto(`/fleet/applications/${server.id}`);
 		await page.getByRole("button", { name: "Lift" }).click();
@@ -85,6 +85,33 @@ test.describe("maintenance windows", () => {
 			page.getByRole("button", { name: "Declare maintenance" }),
 		).toBeVisible();
 		expect(await openWindows(sql)).toBe(0);
+	});
+
+	test("an application under its box's window says so and points at the box", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "shared-box" });
+		const server = await seedServer(sql, {
+			name: "riding-along",
+			groupId: group.id,
+		});
+		await seedStatus(sql, { serverId: server.id, healthy: true });
+		await seedMaintenanceWindow(sql, {
+			machineId: server.machineId,
+			note: "Patching the host",
+		});
+
+		await page.goto(`/fleet/applications/${server.id}`);
+		const covering = page.getByTestId("covering-machine-window");
+		await expect(covering).toContainText("Under maintenance, ending");
+		await expect(covering).toContainText("Patching the host");
+		await expect(covering.getByRole("link")).toHaveAttribute(
+			"href",
+			`/fleet/machines/${server.machineId}`,
+		);
+		// The window is the box's, so it is amended and lifted there.
+		await expect(page.getByRole("button", { name: "Lift" })).toHaveCount(0);
 	});
 
 	test("a server under its group's window says so and points at the group", async ({
@@ -205,7 +232,7 @@ test.describe("maintenance windows", () => {
 		});
 		await seedStatus(sql, { serverId: server.id, healthy: true });
 		await seedMaintenanceWindow(sql, {
-			machineId: server.machineId,
+			applicationId: server.id,
 			note: "Rebooting",
 		});
 
@@ -224,8 +251,8 @@ test.describe("maintenance windows", () => {
 		).toContainText("Rebooting, running long");
 		const rows = await sql.query<{ n: string; amended: string | null }>(
 			"SELECT COUNT(*) AS n, MAX(amended_at::text) AS amended \
-			 FROM maintenance_windows WHERE machine_id = $1 AND ended_at IS NULL",
-			[server.machineId],
+			 FROM maintenance_windows WHERE application_id = $1 AND ended_at IS NULL",
+			[server.id],
 		);
 		expect(Number(rows[0]!.n)).toBe(1);
 		expect(rows[0]!.amended).not.toBeNull();

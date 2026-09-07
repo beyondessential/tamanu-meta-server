@@ -163,8 +163,9 @@ export function MaintenanceLegend() {
 				}}
 			/>
 			<Typography variant="body2" color="text.secondary">
-				Under maintenance, raising nothing. Lighter once lifted. On a machine's
-				icon, an environment's row, or a group's card.
+				Under maintenance, raising nothing. Lighter once lifted. On an
+				application's dot, a machine's icon, an environment's row, or a
+				group's card.
 			</Typography>
 		</Stack>
 	);

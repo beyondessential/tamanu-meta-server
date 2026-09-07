@@ -4,9 +4,10 @@
 //! suspension outlasts the window by the settle period so a machine that is
 //! back but has not reported yet is not paged for.
 //!
-//! A window is over a machine, and the checks it suspends are those of the
-//! applications running on it: these tests declare over the machine and assert
-//! against an application's issues, which is the coverage that matters.
+//! A window over a machine suspends the checks of every application running on
+//! it, and a window over one application suspends that application's alone:
+//! these tests declare at each grain and assert against an application's
+//! issues, which is the coverage that matters.
 
 use commons_types::{server::rank::ServerRank, status::CheckResult};
 use database::{
@@ -318,7 +319,7 @@ async fn the_window_ends_at_its_expected_end_and_suspension_outlasts_it() {
 			"nobody lifted it; its expected end passed"
 		);
 		assert!(
-			MaintenanceWindow::suspends(&mut conn, Some(machine_id), None)
+			MaintenanceWindow::suspends(&mut conn, None, Some(machine_id), None)
 				.await
 				.expect("suspends"),
 			"suspension runs on through the settle period"
@@ -332,7 +333,7 @@ async fn the_window_ends_at_its_expected_end_and_suspension_outlasts_it() {
 			.await
 			.expect("backdate end");
 		assert!(
-			!MaintenanceWindow::suspends(&mut conn, Some(machine_id), None)
+			!MaintenanceWindow::suspends(&mut conn, None, Some(machine_id), None)
 				.await
 				.expect("suspends"),
 			"the settle period has elapsed, so the target is watched again"
@@ -763,6 +764,86 @@ async fn a_machine_window_covers_every_application_on_the_box() {
 	.await;
 }
 
+/// A box serving two products is worked on one product at a time, so a window
+/// over one leaves the other alerting. This is the assertion the application
+/// grain exists for: the machine's window is the only one that quiets the box.
+// spec: MNT#declaring
+#[tokio::test(flavor = "multi_thread")]
+async fn an_application_window_leaves_the_rest_of_the_box_alerting() {
+	commons_tests::db::TestDb::run(async |mut conn, _| {
+		let group_id = insert_group(&mut conn).await;
+		let (machine_id, worked_on) = insert_server(&mut conn, Some(group_id)).await;
+
+		// The other product on the same box, which nobody declared over.
+		let beside: RowId = sql_query(
+			"INSERT INTO applications (type, host, group_id, machine_id) \
+			 VALUES ('tamanu-central', 'http://beside.invalid/', $1, $2) RETURNING id",
+		)
+		.bind::<sql_types::Nullable<sql_types::Uuid>, _>(Some(group_id))
+		.bind::<sql_types::Uuid, _>(machine_id)
+		.get_result(&mut conn)
+		.await
+		.expect("second application");
+
+		MaintenanceWindow::declare(
+			&mut conn,
+			Scope::Application(worked_on),
+			None,
+			in_an_hour(),
+			Some("upgrading the one product"),
+			Some("op"),
+		)
+		.await
+		.expect("declare application window");
+
+		file_check(
+			&mut conn,
+			filing(worked_on, "reachability", CheckResult::Failed),
+		)
+		.await
+		.expect("file");
+		assert_eq!(
+			open_incidents(&mut conn, group_id).await,
+			0,
+			"the application under the window raises nothing"
+		);
+
+		file_check(
+			&mut conn,
+			filing(beside.id, "reachability", CheckResult::Failed),
+		)
+		.await
+		.expect("file");
+		assert_eq!(
+			open_incidents(&mut conn, group_id).await,
+			1,
+			"the product beside it on the same box still alerts"
+		);
+		assert_eq!(
+			live_members(&mut conn, group_id).await,
+			1,
+			"and it is the only failure in the incident"
+		);
+
+		let targets = MaintenanceWindow::suspended_targets(&mut conn)
+			.await
+			.expect("suspended");
+		assert!(
+			targets.application_window(worked_on),
+			"the window is the application's, which is the grain a reader marks at"
+		);
+		assert!(
+			!targets.machine_window(machine_id) && !targets.suspends(machine_id, Some(group_id)),
+			"the box is not being taken down, so its own checks stay watched"
+		);
+		assert!(
+			!targets.suspends_application(beside.id, machine_id, Some(group_id)),
+			"nor is the workload beside it suspended"
+		);
+	})
+	.await;
+}
+
 /// An upgrade rehearsed on a site's clone leaves its production, and the
 /// group's own checks, watched.
 // spec: MNT#declaring
@@ -937,13 +1018,13 @@ async fn an_environment_window_does_not_suspend_an_unranked_member() {
 		);
 
 		assert!(
-			!MaintenanceWindow::suspends(&mut conn, Some(unranked_box), Some(group_id))
+			!MaintenanceWindow::suspends(&mut conn, None, Some(unranked_box), Some(group_id))
 				.await
 				.expect("suspends"),
 			"an unranked application is in no environment's window"
 		);
 		assert!(
-			MaintenanceWindow::suspends(&mut conn, Some(production_box), Some(group_id))
+			MaintenanceWindow::suspends(&mut conn, None, Some(production_box), Some(group_id))
 				.await
 				.expect("suspends"),
 			"the environment's own members are"
@@ -960,7 +1041,7 @@ async fn an_environment_window_does_not_suspend_an_unranked_member() {
 		.await
 		.expect("declare group-wide");
 		assert!(
-			MaintenanceWindow::suspends(&mut conn, Some(unranked_box), Some(group_id))
+			MaintenanceWindow::suspends(&mut conn, None, Some(unranked_box), Some(group_id))
 				.await
 				.expect("suspends"),
 			"the group's own window covers every member, ranked or not"
@@ -996,6 +1077,36 @@ async fn an_environment_windows_notice_names_the_environment() {
 		assert_eq!(
 			declared[0].target, "g clone",
 			"the notice names the environment, not the bare group"
+		);
+	})
+	.await
+}
+
+/// An application's window has to say which workload on which box, or a reader
+/// of the notice cannot tell it from a window over the whole environment.
+// spec: MNT#notification
+#[tokio::test(flavor = "multi_thread")]
+async fn an_application_windows_notice_names_the_application() {
+	commons_tests::db::TestDb::run(async |mut conn, _| {
+		let group_id = insert_group(&mut conn).await;
+		let (_machine, application) = insert_ranked_server(&mut conn, group_id, "clone").await;
+
+		MaintenanceWindow::declare(
+			&mut conn,
+			Scope::Application(application),
+			None,
+			in_an_hour(),
+			Some("upgrading the one product"),
+			Some("op"),
+		)
+		.await
+		.expect("declare over the application");
+
+		let declared = outbox_vars(&mut conn, "maintenance_declared").await;
+		assert_eq!(declared.len(), 1, "declaring notifies once");
+		assert_eq!(
+			declared[0].target, "g clone Tamanu central",
+			"the notice names the environment and the workload in it"
 		);
 	})
 	.await

@@ -558,6 +558,7 @@ diesel::table! {
 		created_at -> Timestamptz,
 		updated_at -> Timestamptz,
 		rank -> Nullable<Text>,
+		application_id -> Nullable<Uuid>,
 	}
 }
 
@@ -875,6 +876,7 @@ diesel::joinable!(machine_enrollment_tokens -> machines (machine_id));
 diesel::joinable!(machine_reported_detail -> machines (machine_id));
 diesel::joinable!(machines -> devices (device_id));
 diesel::joinable!(machines -> server_groups (group_id));
+diesel::joinable!(maintenance_windows -> applications (application_id));
 diesel::joinable!(maintenance_windows -> machines (machine_id));
 diesel::joinable!(maintenance_windows -> server_groups (server_group_id));
 diesel::joinable!(migration_tests -> applications (application_id));

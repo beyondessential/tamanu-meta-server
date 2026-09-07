@@ -2444,16 +2444,21 @@ async fn re_evaluate_incident_membership(
 	)
 	.await?;
 	// A maintenance window over the target suspends everything on it, so its
-	// issues leave exactly as a silenced one does. A window is over a machine,
-	// and an application's issues are covered by the window over the box it
-	// runs on, so an application-scoped issue resolves through to its machine.
-	let cover_machine = match (issue.machine_id, issue.application_id) {
-		(Some(mid), _) => Some(mid),
-		(None, Some(aid)) => Some(Application::get_by_id(conn, aid).await?.machine_id),
-		(None, None) => None,
+	// issues leave exactly as a silenced one does. An application's issues are
+	// covered by a window over the application itself and by any over the box
+	// it runs on, so it resolves through to its machine as well as naming
+	// itself.
+	let (cover_application, cover_machine) = match (issue.machine_id, issue.application_id) {
+		(Some(mid), _) => (None, Some(mid)),
+		(None, Some(aid)) => (
+			Some(aid),
+			Some(Application::get_by_id(conn, aid).await?.machine_id),
+		),
+		(None, None) => (None, None),
 	};
 	let maintained = crate::maintenance_windows::MaintenanceWindow::suspends(
 		conn,
+		cover_application,
 		cover_machine,
 		target.group_id(),
 	)

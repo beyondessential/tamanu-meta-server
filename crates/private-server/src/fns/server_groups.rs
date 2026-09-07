@@ -232,6 +232,7 @@ pub async fn get(
 	let maintained = database::maintenance_windows::MaintenanceWindow::suspends(
 		&mut conn,
 		None,
+		None,
 		Some(args.server_group_id),
 	)
 	.await?;

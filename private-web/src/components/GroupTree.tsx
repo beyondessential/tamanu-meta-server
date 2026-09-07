@@ -106,6 +106,11 @@ function MachineBlock({
 								up={application.up ?? "gone"}
 								health={application.health ?? undefined}
 								monitored={application.is_monitored !== false}
+								maintained={application.own_window ?? false}
+								// The enclosure mutes everything on a box under a
+								// window, so a dot mutes itself only where the
+								// window is its own.
+								dim={(application.own_window ?? false) && !machine.maintained}
 								size={DOT_SIZE}
 							/>
 						</Box>
@@ -146,6 +151,8 @@ function MachineBlock({
 								up={application.up ?? "gone"}
 								health={application.health ?? undefined}
 								monitored={application.is_monitored !== false}
+								maintained={application.own_window ?? false}
+								dim={application.maintained ?? false}
 								size={DOT_SIZE}
 							/>
 							<Name

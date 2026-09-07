@@ -1,5 +1,5 @@
-//! Operator declarations that a machine, a group, or one of a group's
-//! environments is being worked on.
+//! Operator declarations that an application, a machine, a group, or one of a
+//! group's environments is being worked on.
 //!
 //! While a window suspends a target its checks are observed, graded, and
 //! presented exactly as they would be without it. What the window holds back
@@ -7,10 +7,10 @@
 //! incident, so nothing notifies, and an operator working through a window
 //! watches the check they are fixing come good.
 //!
-//! A window is over the machine rather than over one workload on it. Taking a
-//! box down to patch it stops everything running on it, so a window naming one
-//! application would leave the others alerting through work that was always
-//! going to stop them. One declaration, N consequences.
+//! A window over a machine covers every application on it: taking a box down
+//! to patch it stops everything running on it, so that is one declaration with
+//! N consequences. A window over one application covers that application
+//! alone, for work stopping one product on a box that serves several.
 //!
 //! Suspension outlasts the window itself by [`SETTLE`]. A machine is back
 //! before the sources on it have reported again, and a machine whose every
@@ -28,6 +28,7 @@ use jiff::{SignedDuration, Timestamp};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::applications::Application;
 use crate::issues::Scope;
 use crate::machines::Machine;
 use crate::server_groups::{ServerGroup, environment_name, rank_priority};
@@ -47,9 +48,11 @@ pub const SETTLE: SignedDuration = SignedDuration::from_mins(10);
 // spec: MNT#presentation
 #[derive(Clone, Debug, Default)]
 pub struct SuspendedTargets {
+	pub applications: HashSet<Uuid>,
 	pub machines: HashSet<Uuid>,
 	pub environments: HashSet<(Uuid, ServerRank)>,
 	pub groups: HashSet<Uuid>,
+	pub holding_applications: HashSet<Uuid>,
 	pub holding_machines: HashSet<Uuid>,
 	pub holding_environments: HashSet<(Uuid, ServerRank)>,
 	pub holding_groups: HashSet<Uuid>,
@@ -61,6 +64,7 @@ pub struct SuspendedTargets {
 
 /// A window's targets with the two timestamps that say whether it still holds.
 type SuspensionRow = (
+	Option<Uuid>,
 	Option<Uuid>,
 	Option<Uuid>,
 	Option<ServerRank>,
@@ -83,6 +87,38 @@ impl SuspendedTargets {
 			&& !self.holding_machines.contains(&machine)
 			&& !self.in_holding_environment(machine)
 			&& !group.is_some_and(|g| self.holding_groups.contains(&g))
+	}
+
+	/// Is this application suspended, by a window of its own or by any window
+	/// over the box it runs on?
+	pub fn suspends_application(
+		&self,
+		application: Uuid,
+		machine: Uuid,
+		group: Option<Uuid>,
+	) -> bool {
+		self.applications.contains(&application) || self.suspends(machine, group)
+	}
+
+	/// Is every window covering this application ended, leaving it in the
+	/// settle period?
+	pub fn settling_application(
+		&self,
+		application: Uuid,
+		machine: Uuid,
+		group: Option<Uuid>,
+	) -> bool {
+		self.suspends_application(application, machine, group)
+			&& !self.holding_applications.contains(&application)
+			&& !self.holding_machines.contains(&machine)
+			&& !self.in_holding_environment(machine)
+			&& !group.is_some_and(|g| self.holding_groups.contains(&g))
+	}
+
+	/// A window declared over this application in particular, as against one
+	/// reaching it through the box it runs on.
+	pub fn application_window(&self, application: Uuid) -> bool {
+		self.applications.contains(&application)
 	}
 
 	/// A window declared over this box in particular, as against one it falls
@@ -123,14 +159,17 @@ impl SuspendedTargets {
 	}
 }
 
-/// A declaration that a machine, a group, or one of a group's environments is
-/// being worked on.
+/// A declaration that an application, a machine, a group, or one of a group's
+/// environments is being worked on.
 #[derive(Clone, Debug, Serialize, Deserialize, Queryable, Selectable, utoipa::ToSchema)]
 #[diesel(table_name = crate::schema::maintenance_windows)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct MaintenanceWindow {
 	/// Unique identifier of this window.
 	pub id: Uuid,
+	/// Set for a window over one application, covering that application's
+	/// checks and nothing else on the box it runs on.
+	pub application_id: Option<Uuid>,
 	/// Set for a window over one machine, covering the machine's own checks
 	/// and those of every application running on it.
 	pub machine_id: Option<Uuid>,
@@ -178,7 +217,7 @@ pub struct MaintenanceWindow {
 impl MaintenanceWindow {
 	/// The target this window covers.
 	pub fn scope(&self) -> Scope {
-		Scope::from_columns(None, self.machine_id, self.server_group_id)
+		Scope::from_columns(self.application_id, self.machine_id, self.server_group_id)
 	}
 
 	/// When the window itself ended, or is due to: an operator's lift where
@@ -215,9 +254,9 @@ impl MaintenanceWindow {
 		by: Option<&str>,
 	) -> Result<Self> {
 		use crate::schema::maintenance_windows::dsl;
-		let Some((server, group)) = fleet_columns(scope) else {
+		let Some((application, machine, group)) = fleet_columns(scope) else {
 			return Err(AppError::BadRequest(
-				"a maintenance window covers a machine or a group".into(),
+				"a maintenance window covers an application, a machine or a group".into(),
 			));
 		};
 		if rank.is_some() && group.is_none() {
@@ -248,7 +287,8 @@ impl MaintenanceWindow {
 
 		let window: Self = diesel::insert_into(dsl::maintenance_windows)
 			.values((
-				dsl::machine_id.eq(server),
+				dsl::application_id.eq(application),
+				dsl::machine_id.eq(machine),
 				dsl::server_group_id.eq(group),
 				dsl::rank.eq(rank),
 				dsl::expected_end.eq(jiff_diesel::Timestamp::from(expected_end)),
@@ -353,7 +393,7 @@ impl MaintenanceWindow {
 		rank: Option<ServerRank>,
 	) -> Result<Option<Self>> {
 		use crate::schema::maintenance_windows::dsl;
-		let Some((server, group)) = fleet_columns(scope) else {
+		let Some((application, machine, group)) = fleet_columns(scope) else {
 			return Ok(None);
 		};
 		dsl::maintenance_windows
@@ -361,7 +401,8 @@ impl MaintenanceWindow {
 			.filter(
 				dsl::ended_at
 					.is_null()
-					.and(dsl::machine_id.is_not_distinct_from(server))
+					.and(dsl::application_id.is_not_distinct_from(application))
+					.and(dsl::machine_id.is_not_distinct_from(machine))
 					.and(dsl::server_group_id.is_not_distinct_from(group))
 					.and(dsl::rank.is_not_distinct_from(rank)),
 			)
@@ -391,14 +432,15 @@ impl MaintenanceWindow {
 		limit: i64,
 	) -> Result<Vec<Self>> {
 		use crate::schema::maintenance_windows::dsl;
-		let Some((server, group)) = fleet_columns(scope) else {
+		let Some((application, machine, group)) = fleet_columns(scope) else {
 			return Ok(Vec::new());
 		};
 		dsl::maintenance_windows
 			.select(Self::as_select())
 			.filter(
-				dsl::machine_id
-					.is_not_distinct_from(server)
+				dsl::application_id
+					.is_not_distinct_from(application)
+					.and(dsl::machine_id.is_not_distinct_from(machine))
 					.and(dsl::server_group_id.is_not_distinct_from(group)),
 			)
 			.order(dsl::declared_at.desc())
@@ -408,30 +450,35 @@ impl MaintenanceWindow {
 			.map_err(AppError::from)
 	}
 
-	/// Is a check covered by `(machine_id, group_id)` suspended? A target is
-	/// covered by its machine's window, by its group's, and by the window over
-	/// the environment the machine serves, and stays suspended until the last
-	/// of them has settled. A group's own checks are the group's window's
-	/// alone.
+	/// Is a check covered by `(application_id, machine_id, group_id)`
+	/// suspended? A target is covered by its own window, by the windows over
+	/// what contains it, and stays suspended until the last of them has
+	/// settled. A group's own checks are the group's window's alone.
 	///
-	/// `machine_id` is the machine a window would have to name to cover this
+	/// `application_id` is set only for an application's own check, and
+	/// `machine_id` is the machine a window would have to name to cover the
 	/// check: for a machine's own check, itself; for an application's, the
 	/// machine it runs on, since taking the box down stops the workload too.
+	/// An application's window covers that application and none of its
+	/// neighbours on the box, which is the whole reason the grain exists.
+	// spec: MNT#declaring
 	pub async fn suspends(
 		db: &mut AsyncPgConnection,
+		application_id: Option<Uuid>,
 		machine_id: Option<Uuid>,
 		group_id: Option<Uuid>,
 	) -> Result<bool> {
 		use crate::schema::maintenance_windows::dsl;
-		if machine_id.is_none() && group_id.is_none() {
+		if application_id.is_none() && machine_id.is_none() && group_id.is_none() {
 			return Ok(false);
 		}
 		let cutoff = jiff_diesel::Timestamp::from(Timestamp::now() - SETTLE);
 		let ranks: Vec<Option<ServerRank>> = dsl::maintenance_windows
 			.select(dsl::rank)
 			.filter(
-				dsl::machine_id
-					.eq(machine_id)
+				dsl::application_id
+					.eq(application_id)
+					.or(dsl::machine_id.eq(machine_id))
 					.or(dsl::server_group_id.eq(group_id)),
 			)
 			.filter(
@@ -459,16 +506,16 @@ impl MaintenanceWindow {
 	/// The machines and groups currently suspended, for callers judging many
 	/// targets in one pass.
 	///
-	/// A window is declared over a machine, so an application is suspended by
-	/// its machine's id appearing here rather than its own. An environment's
-	/// window counts as one over each machine serving it, since it covers
-	/// nothing of the group itself.
+	/// An application is suspended by a window of its own, or by one over the
+	/// box it runs on appearing here instead. An environment's window is kept
+	/// as the environment's, since it covers nothing of the group itself.
 	pub async fn suspended_targets(db: &mut AsyncPgConnection) -> Result<SuspendedTargets> {
 		use crate::schema::maintenance_windows::dsl;
 		let now = Timestamp::now();
 		let cutoff = jiff_diesel::Timestamp::from(now - SETTLE);
 		let rows: Vec<SuspensionRow> = dsl::maintenance_windows
 			.select((
+				dsl::application_id,
 				dsl::machine_id,
 				dsl::server_group_id,
 				dsl::rank,
@@ -485,8 +532,15 @@ impl MaintenanceWindow {
 			.await
 			.map_err(AppError::from)?;
 		let mut targets = SuspendedTargets::default();
-		for (machine, group, rank, ended_at, expected_end) in rows {
+		for (application, machine, group, rank, ended_at, expected_end) in rows {
 			let holds = ended_at.is_none() && now < Timestamp::from(expected_end);
+			if let Some(id) = application {
+				targets.applications.insert(id);
+				if holds {
+					targets.holding_applications.insert(id);
+				}
+				continue;
+			}
 			match (machine, group, rank) {
 				(Some(id), _, _) => {
 					targets.machines.insert(id);
@@ -596,9 +650,21 @@ pub async fn target_label(
 				None => Ok(own),
 			}
 		}
-		// A window is never declared over one application, so this is only
-		// reachable if a caller hands in a scope from elsewhere.
-		Scope::Application(aid) => Ok(aid.to_string()),
+		Scope::Application(aid) => {
+			let application = Application::get_by_id(db, aid).await?;
+			let own = application.display_name();
+			match application.group_id {
+				Some(gid) => {
+					let group = ServerGroup::get_by_id(db, gid).await?;
+					let within = match application.rank {
+						Some(rank) => environment_name(&group.name, rank),
+						None => group.name,
+					};
+					Ok(format!("{within} {own}"))
+				}
+				None => Ok(own),
+			}
+		}
 		Scope::Group(gid) => {
 			let group = ServerGroup::get_by_id(db, gid).await?;
 			Ok(match rank {
@@ -614,17 +680,15 @@ fn format_when(at: Timestamp) -> String {
 	at.strftime("%Y-%m-%d %H:%M UTC").to_string()
 }
 
-/// The storage columns for a window's scope. Canopy-wide is not a target a
-/// window covers: Canopy's own checks are its self-monitoring, and fleet
-/// work never suspends them.
-fn fleet_columns(scope: Scope) -> Option<(Option<Uuid>, Option<Uuid>)> {
+/// The `(application, machine, group)` storage columns for a window's scope.
+/// Canopy-wide is not a target a window covers: Canopy's own checks are its
+/// self-monitoring, and fleet work never suspends them.
+fn fleet_columns(scope: Scope) -> Option<(Option<Uuid>, Option<Uuid>, Option<Uuid>)> {
 	match scope {
-		Scope::Machine(id) => Some((Some(id), None)),
-		Scope::Group(id) => Some((None, Some(id))),
-		// A window covers a machine or a group. An application is covered
-		// through its machine rather than named, and Canopy's own checks are
-		// its self-monitoring, which fleet work never suspends.
-		Scope::Application(_) | Scope::Global => None,
+		Scope::Application(id) => Some((Some(id), None, None)),
+		Scope::Machine(id) => Some((None, Some(id), None)),
+		Scope::Group(id) => Some((None, None, Some(id))),
+		Scope::Global => None,
 	}
 }
 

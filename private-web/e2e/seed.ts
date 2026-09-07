@@ -253,7 +253,7 @@ export interface SeededServer {
 	host: string;
 	type: ApplicationType;
 	rank: ServerRank | null;
-	/** The box this workload runs on. Maintenance is declared over it. */
+	/** The box this workload runs on. */
 	machineId: string;
 }
 
@@ -1615,6 +1615,7 @@ export interface SeededMaintenanceWindow {
 export async function seedMaintenanceWindow(
 	sql: Sql,
 	opts: {
+		applicationId?: string;
 		machineId?: string;
 		serverGroupId?: string;
 		/** With `serverGroupId`, covers only that group's applications at this
@@ -1630,12 +1631,13 @@ export async function seedMaintenanceWindow(
 ): Promise<SeededMaintenanceWindow> {
 	const rows = await sql.query<{ id: string }>(
 		`INSERT INTO maintenance_windows
-		   (machine_id, server_group_id, rank, expected_end, ended_at, note, declared_by)
-		 VALUES ($1, $2, $3, NOW() + make_interval(mins => $4),
-		         CASE WHEN $5::int IS NULL THEN NULL ELSE NOW() - make_interval(mins => $5::int) END,
-		         $6, $7)
+		   (application_id, machine_id, server_group_id, rank, expected_end, ended_at, note, declared_by)
+		 VALUES ($1, $2, $3, $4, NOW() + make_interval(mins => $5),
+		         CASE WHEN $6::int IS NULL THEN NULL ELSE NOW() - make_interval(mins => $6::int) END,
+		         $7, $8)
 		 RETURNING id`,
 		[
+			opts.applicationId ?? null,
 			opts.machineId ?? null,
 			opts.serverGroupId ?? null,
 			opts.rank ?? null,

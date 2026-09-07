@@ -179,10 +179,12 @@ export default function ServerDetail() {
 				</Paper>
 			)}
 			<MaintenanceSection
-				scope="machine"
+				scope="application"
 				anchor="maintenance"
-				id={data.server.machine_id}
+				id={data.server.id}
 				targetLabel={applicationName(data.server)}
+				machineId={data.server.machine_id}
+				machineName={data.machine_name ?? null}
 				groupId={data.group?.id ?? null}
 				groupName={data.group?.name ?? null}
 				rank={data.server.rank ?? null}

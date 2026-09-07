@@ -97,6 +97,9 @@ export type VersionStatus = Solidify<Schemas["VersionStatus"]>;
 export type DeviceRole = Solidify<Schemas["DeviceRole"]>;
 export type ProvisionedCredential = Solidify<Schemas["ProvisionedCredential"]>;
 export type MaintenanceWindow = Solidify<Schemas["MaintenanceWindow"]>;
+/** The grain a window is declared at. An environment is a group with a rank.
+ * spec: MNT#declaring */
+export type MaintenanceScope = "application" | "machine" | "group";
 export type ResolvedReason = Solidify<Schemas["ResolvedReason"]>;
 
 export type VersionStr = Solidify<Schemas["VersionStr"]>;

@@ -4,7 +4,7 @@ id: MNT
 
 # Maintenance windows
 
-A maintenance window is an operator's declaration that a machine, a group, or one of a group's environments is being worked on, so what Canopy observes while the work runs raises nothing.
+A maintenance window is an operator's declaration that an application, a machine, a group, or one of a group's environments is being worked on, so what Canopy observes while the work runs raises nothing.
 A window is bounded in time, ends itself, and records who declared it and what for, so a quiet part of the fleet is always attributable to a decision someone made.
 
 ## Why it exists
@@ -18,19 +18,24 @@ Turning a machine's monitoring off is unbounded, and a switch with nothing to tu
 
 ## Declaring
 
-An operator declares a window over one machine, one group, or one of a group's environments, giving the time it is expected to end and, optionally, a note saying what is being done.
+An operator declares a window over one application, one machine, one group, or one of a group's environments, giving the time it is expected to end and, optionally, a note saying what is being done.
 Canopy records who declared it and when, alongside the expected end and the note.
 Declaring, amending, and lifting are administrative actions and are audited (see [ADM](../private-server/admin-access.md)).
 
-A window is over the machine rather than over one workload on it, and covers the machine's own checks and those of every application running on it.
-Taking a box down to patch it stops everything on it, so a window naming one application would leave the others alerting through work that was always going to stop them: one declaration, however many workloads.
+A window over a machine covers the machine's own checks and those of every application running on it.
+Taking a box down to patch it stops everything on it, so that is one declaration however many workloads, and an operator patching a host never has to name what it runs.
+
+A window over one application covers that application's checks and nothing else on the box, for work that stops one product where the box serves several: an upgrade of the Tamanu server on a host also running mSupply leaves mSupply watched.
+The machine's own checks stay watched with it, since the box is not being taken down.
+
+A control offering the declaration says which grain it declares at, so an operator learns it from the control rather than from the result.
 
 A group's window covers the group's own checks and those of every machine in it, including machines that join while it holds.
 
 A window over one of a group's environments covers the machines serving that environment and nothing else of the group: an upgrade rehearsed on a site's clone leaves its production watched, and the group's own checks such as its backups with it.
 An environment is a group's applications at one rank, and the machines serving it are those whose own rank is that one, a machine taking the rank of the highest-ranked application on it (see [GRP](../servers/groups.md), "Environments").
 
-A machine covered by its own window, by its environment's, and by its group's stays suspended until the last of them has ended.
+A target stays suspended until the last window covering it has ended: for an application, its own and its machine's; for a machine, its own, its environment's and its group's.
 
 A group's own window, and the window over each of its environments, are separate targets, so a target has at most one open window: declaring over one that already has a window amends it, recording who amended and when.
 
@@ -75,8 +80,8 @@ The ending says whether an operator lifted the window or its expected end passed
 ## Presentation
 
 A target under a window presents its own health and reachability, and is marked as under maintenance wherever they are presented as they currently stand, distinguishably from a machine nobody is watching (see [CHK](checks.md), "Monitoring gate").
-Where a machine is drawn small, as a mark on a dot rather than a row of its own, the mark is a fill in a hue no health state uses: a pattern needs room to resolve and a target's own colours are already spoken for.
-Its health is muted and carries the window and when it ends, so a failing machine under maintenance is not read as one nobody has noticed.
+The mark is drawn at the grain the window was declared over, so an environment's window does not read as every machine in it having one of its own: an application's dot, a machine's enclosure, an environment's row, a group's card.
+Every target the window reaches has its health muted, marked or not, and carries the window and when it ends, so a failing target under maintenance is not read as one nobody has noticed.
 A target serving out the settle period carries the mark still, distinguished from one whose window holds, so lifting a window shows on the target rather than only on the window.
 The status legend names both marks.
 
