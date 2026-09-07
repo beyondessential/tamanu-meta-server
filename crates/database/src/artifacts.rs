@@ -459,7 +459,12 @@ impl Artifact {
 		all.iter().any(|other| {
 			other.artifact_type == artifact.artifact_type
 				&& other.platform == artifact.platform
-				&& other.group_id == artifact.group_id
+				// A range this artifact's own scope cannot see is not one it
+				// displaces, and a group's range outranks an unscoped exact, so
+				// what an exact artifact overrides is a range of its own group
+				// or an unscoped one.
+				// spec: ART#what-a-version-offers
+				&& (other.group_id.is_none() || other.group_id == artifact.group_id)
 				&& other.id != artifact.id
 				&& other
 					.version_range_pattern
