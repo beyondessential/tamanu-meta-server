@@ -142,6 +142,76 @@ async fn a_built_pair_drops_off_the_worklist() {
 	.await
 }
 
+/// Masking alters the configuration a schema follows from, so a declaration set
+/// to redact builds nothing rather than building from a database that is no
+/// longer the group's.
+///
+/// spec: RPT#the-build-contract
+#[tokio::test(flavor = "multi_thread")]
+async fn a_redacting_declaration_builds_no_schema() {
+	commons_tests::server::run_with_device_auth(
+		"backup-restore",
+		async |mut conn, cert, device_id, public, _| {
+			seed(&mut conn, device_id).await;
+
+			conn.batch_execute(&format!(
+				"UPDATE restore_replicas SET redacts = true
+				 WHERE consumer_device_id = '{device_id}'"
+			))
+			.await
+			.expect("set the declaration to redact");
+
+			let response = public
+				.get("/restore-worklist")
+				.add_header("x-forwarded-client-cert", &format!("Cert={cert}"))
+				.await;
+			response.assert_status_ok();
+			let entries: Vec<serde_json::Value> = response.json();
+
+			assert!(
+				!entries.iter().any(|e| e["intent"] == "schema-build"),
+				"a redacting declaration dispatches no build: {entries:?}"
+			);
+		},
+	)
+	.await
+}
+
+/// The configuration a schema follows from is held centrally, so every pair of
+/// a group restores a central's snapshot. A group with no central has no
+/// snapshot to build from, and dispatching against a facility would build a
+/// schema from the wrong half of the deployment.
+///
+/// spec: RPT#the-build-contract
+#[tokio::test(flavor = "multi_thread")]
+async fn a_group_with_no_central_dispatches_nothing() {
+	commons_tests::server::run_with_device_auth(
+		"backup-restore",
+		async |mut conn, cert, device_id, public, _| {
+			seed(&mut conn, device_id).await;
+
+			conn.batch_execute(&format!(
+				"UPDATE applications SET type = 'tamanu-facility' WHERE id = '{CENTRAL}'"
+			))
+			.await
+			.expect("leave the group with no central");
+
+			let response = public
+				.get("/restore-worklist")
+				.add_header("x-forwarded-client-cert", &format!("Cert={cert}"))
+				.await;
+			response.assert_status_ok();
+			let entries: Vec<serde_json::Value> = response.json();
+
+			assert!(
+				!entries.iter().any(|e| e["intent"] == "schema-build"),
+				"nothing to restore a central's snapshot from: {entries:?}"
+			);
+		},
+	)
+	.await
+}
+
 /// An intent may advertise `redact` alongside building schemas, and a schema is
 /// built against the group's own data rather than a masked copy. Canopy owns
 /// the masking parameters, and sending them unset is what tells a consumer not

@@ -630,3 +630,83 @@ async fn two_applications_on_one_version_are_one_pair() {
 	})
 	.await;
 }
+
+/// A build needs the version's migrations, which reach a builder as that
+/// version's published artifacts. A version Canopy holds no published release
+/// row for has none, so a server reporting one is not a pair however loudly it
+/// reports it, and Canopy is not owed a schema it cannot build.
+///
+/// spec: RPT#pairs
+#[tokio::test(flavor = "multi_thread")]
+async fn only_a_published_version_is_a_pair() {
+	TestDb::run(|mut conn, _url| async move {
+		let (older, newer) = seed(&mut conn).await;
+
+		for status in ["draft", "yanked"] {
+			conn.batch_execute(&format!(
+				"UPDATE versions SET status = '{status}' WHERE id = '{older}'"
+			))
+			.await
+			.expect("change the version's status");
+
+			let ids: Vec<Uuid> = versions_for_group(&mut conn, group())
+				.await
+				.expect("derive versions")
+				.iter()
+				.map(|v| v.id)
+				.collect();
+
+			assert!(!ids.contains(&older), "a {status} version is not a pair");
+			assert!(ids.contains(&newer), "the published one still is");
+		}
+	})
+	.await;
+}
+
+/// A group is owed a schema for where it is going as well as where it is, so
+/// an open plan's target is a pair before anything reports running it. A plan
+/// that is no longer open is history and adds nothing: the group either got
+/// there, in which case an application reports it, or it is not going.
+///
+/// spec: RPT#pairs
+#[tokio::test(flavor = "multi_thread")]
+async fn an_open_plan_s_target_is_a_pair_and_a_closed_one_is_not() {
+	TestDb::run(|mut conn, _url| async move {
+		let (_older, newer) = seed(&mut conn).await;
+
+		// Nothing reports the target: the group is on 2.59.0 throughout, and
+		// 2.60.0 is only where it is heading.
+		conn.batch_execute(&format!(
+			"UPDATE application_reported_detail SET version = '2.59.0';
+
+			 INSERT INTO upgrade_plans (group_id, target_version_id, created_by)
+			 VALUES ('{GROUP}', '{newer}', 'seed@bes.au')"
+		))
+		.await
+		.expect("plan the upgrade");
+
+		let ids: Vec<Uuid> = versions_for_group(&mut conn, group())
+			.await
+			.expect("derive versions")
+			.iter()
+			.map(|v| v.id)
+			.collect();
+		assert!(ids.contains(&newer), "the plan's target is a pair: {ids:?}");
+
+		conn.batch_execute("UPDATE upgrade_plans SET met_at = NOW()")
+			.await
+			.expect("meet the plan");
+
+		let ids: Vec<Uuid> = versions_for_group(&mut conn, group())
+			.await
+			.expect("derive versions")
+			.iter()
+			.map(|v| v.id)
+			.collect();
+		assert!(
+			!ids.contains(&newer),
+			"a met plan is history, and nothing reports its target: {ids:?}"
+		);
+	})
+	.await;
+}
