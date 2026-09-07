@@ -493,3 +493,122 @@ async fn a_malformed_range_matches_nothing() {
 	})
 	.await;
 }
+
+/// Canopy records which device registered an artifact and the run that produced
+/// it, so one that arrived by automation is distinguishable from one entered by
+/// hand. A re-registration carries the new provenance rather than keeping the
+/// old, since the row now describes a different build.
+// spec: ART#registration
+#[tokio::test(flavor = "multi_thread")]
+async fn provenance_is_recorded_and_replaced() {
+	TestDb::run(|mut conn, _url| async move {
+		let version = seed_version(&mut conn, 2, 60, 0).await;
+		let theirs = seed_group(&mut conn, "kamaka").await;
+		let run = Uuid::new_v4();
+
+		let mut first = held(version, "reporting-schema", theirs, b"first");
+		first.run_id = Some(run);
+		let registered = Artifact::register(&mut conn, first)
+			.await
+			.expect("register with a run");
+		assert_eq!(registered.run_id, Some(run));
+
+		// Entered by hand this time: the run that is no longer named is cleared
+		// rather than left standing over bytes it did not produce.
+		let second = held(version, "reporting-schema", theirs, b"second");
+		let replaced = Artifact::register(&mut conn, second)
+			.await
+			.expect("register without a run");
+		assert_eq!(replaced.id, registered.id);
+		assert_eq!(replaced.run_id, None);
+	})
+	.await;
+}
+
+/// Canopy keeps none of what it has stopped serving, so deleting an artifact
+/// takes the bytes with it rather than leaving them addressable.
+// spec: ART#where-an-artifact-rests
+#[tokio::test(flavor = "multi_thread")]
+async fn deleting_an_artifact_takes_its_bytes() {
+	TestDb::run(|mut conn, _url| async move {
+		let version = seed_version(&mut conn, 2, 60, 0).await;
+		let theirs = seed_group(&mut conn, "kamaka").await;
+
+		let artifact = Artifact::register(
+			&mut conn,
+			held(version, "reporting-schema", theirs, b"schema"),
+		)
+		.await
+		.expect("register");
+
+		Artifact::delete(&mut conn, artifact.id)
+			.await
+			.expect("delete");
+
+		assert!(
+			Artifact::content_for(&mut conn, artifact.id)
+				.await
+				.expect("read content")
+				.is_none()
+		);
+		let all = Artifact::get_for_version_all_matches(&mut conn, version, Scope::Fleet)
+			.await
+			.expect("operator view");
+		assert!(all.is_empty());
+	})
+	.await;
+}
+
+/// An artifact Canopy does not hold has no bytes to read, which is what makes
+/// the download fall through to the location it recorded instead.
+// spec: ART#where-an-artifact-rests
+#[tokio::test(flavor = "multi_thread")]
+async fn an_unscoped_artifact_holds_no_bytes() {
+	TestDb::run(|mut conn, _url| async move {
+		let version = seed_version(&mut conn, 2, 60, 0).await;
+
+		let artifact = Artifact::register(&mut conn, unscoped(version, "installer", "https://x/i"))
+			.await
+			.expect("register");
+
+		assert!(
+			Artifact::content_for(&mut conn, artifact.id)
+				.await
+				.expect("read content")
+				.is_none()
+		);
+	})
+	.await;
+}
+
+/// A group's artifacts go with the group. Bytes Canopy holds for a group that
+/// no longer exists are bytes it has stopped serving.
+// spec: ART#where-an-artifact-rests
+#[tokio::test(flavor = "multi_thread")]
+async fn deleting_a_group_takes_its_artifacts() {
+	TestDb::run(|mut conn, _url| async move {
+		let version = seed_version(&mut conn, 2, 60, 0).await;
+		let theirs = seed_group(&mut conn, "kamaka").await;
+
+		Artifact::register(&mut conn, unscoped(version, "installer", "https://x/i"))
+			.await
+			.expect("unscoped");
+		Artifact::register(
+			&mut conn,
+			held(version, "reporting-schema", theirs, b"schema"),
+		)
+		.await
+		.expect("held");
+
+		conn.batch_execute(&format!("DELETE FROM server_groups WHERE id = '{theirs}'"))
+			.await
+			.expect("delete the group");
+
+		let all = Artifact::get_for_version_all_matches(&mut conn, version, Scope::Fleet)
+			.await
+			.expect("operator view");
+		assert_eq!(all.len(), 1, "the group's went with it");
+		assert_eq!(all[0].group_id, None);
+	})
+	.await;
+}

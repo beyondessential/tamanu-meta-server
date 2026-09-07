@@ -365,3 +365,116 @@ async fn a_device_with_no_group_is_answered_anonymously() {
 	)
 	.await
 }
+
+/// The public pages and the release feed are read by anyone, so they resolve
+/// unscoped whoever asks. A caller presenting the owning group's credential
+/// still sees no trace of the artifact Canopy holds for it.
+// spec: ART#who-is-offered-a-group-scoped-artifact
+#[tokio::test(flavor = "multi_thread")]
+async fn the_public_pages_never_carry_a_group_s_artifact() {
+	commons_tests::server::run_with_device_auth(
+		"machine",
+		async |mut conn, cert, device_id, public, _| {
+			seed(&mut conn).await;
+			enrol(&mut conn, device_id, GROUP_A).await;
+
+			for path in [
+				"/versions/2.60.0",
+				"/versions/2.60.0/mobile",
+				"/versions/rss",
+			] {
+				let response = public
+					.get(path)
+					.add_header("x-forwarded-client-cert", &format!("Cert={cert}"))
+					.await;
+				// A page that did not render carries no artifact either, which
+				// would pass the assertions below for the wrong reason.
+				response.assert_status_ok();
+				let body = response.text();
+				assert!(
+					!body.contains(THEIRS),
+					"{path} names the artifact held for group A"
+				);
+				assert!(
+					!body.contains("group a schema"),
+					"{path} carries the bytes held for group A"
+				);
+			}
+		},
+	)
+	.await
+}
+
+/// A corrupted artifact fails the read as itself, so an operator reading the
+/// problem type is told the bytes no longer match rather than being left with
+/// an unclassified fault.
+// spec: ART#digests
+#[tokio::test(flavor = "multi_thread")]
+async fn a_digest_mismatch_says_what_it_is() {
+	commons_tests::server::run_with_device_auth(
+		"machine",
+		async |mut conn, cert, device_id, public, _| {
+			seed(&mut conn).await;
+			enrol(&mut conn, device_id, GROUP_A).await;
+
+			conn.batch_execute(&format!(
+				"UPDATE artifacts SET content = 'tampered'::bytea WHERE id = '{THEIRS}'"
+			))
+			.await
+			.expect("corrupt the stored bytes");
+
+			let response = public
+				.get(&format!("/versions/2.60.0/artifacts/{THEIRS}/download"))
+				.add_header("x-forwarded-client-cert", &format!("Cert={cert}"))
+				.await;
+
+			assert_eq!(response.status_code(), StatusCode::INTERNAL_SERVER_ERROR);
+			let problem: serde_json::Value = response.json();
+			assert_eq!(problem["type"], "/errors/artifact-digest-mismatch");
+		},
+	)
+	.await
+}
+
+/// A registration through the endpoint replaces what stood for the same version,
+/// type and platform, so a caller is never offered two of a kind.
+// spec: ART#registration
+#[tokio::test(flavor = "multi_thread")]
+async fn registering_again_over_the_wire_replaces() {
+	commons_tests::server::run_with_device_auth(
+		"releaser",
+		async |mut conn, cert, _device_id, public, _| {
+			seed(&mut conn).await;
+
+			let first = public
+				.post("/artifacts/2.60.0/installer/windows")
+				.add_header("x-forwarded-client-cert", &format!("Cert={cert}"))
+				.text("https://example.com/first.exe")
+				.await;
+			first.assert_status_ok();
+			let first: serde_json::Value = first.json();
+
+			let second = public
+				.post("/artifacts/2.60.0/installer/windows")
+				.add_header("x-forwarded-client-cert", &format!("Cert={cert}"))
+				.text("https://example.com/second.exe")
+				.await;
+			second.assert_status_ok();
+			let second: serde_json::Value = second.json();
+
+			assert_eq!(first["id"], second["id"], "replaced in place");
+			assert_eq!(second["download_url"], "https://example.com/second.exe");
+
+			let listed = public.get("/versions/2.60.0/artifacts").await;
+			let artifacts: Vec<serde_json::Value> = listed.json();
+			assert_eq!(
+				artifacts
+					.iter()
+					.filter(|a| a["artifact_type"] == "installer")
+					.count(),
+				1,
+			);
+		},
+	)
+	.await
+}
