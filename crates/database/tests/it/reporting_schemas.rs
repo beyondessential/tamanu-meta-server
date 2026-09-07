@@ -159,6 +159,7 @@ async fn a_facility_on_its_own_version_is_a_pair_of_its_own() {
 async fn a_failed_build_settles_the_pair() {
 	TestDb::run(|mut conn, _url| async move {
 		let (_older, newer) = seed(&mut conn).await;
+		declare_builder(&mut conn, true).await;
 
 		assert!(
 			!ReportingSchemaBuild::is_settled(&mut conn, group(), newer)
@@ -190,6 +191,7 @@ async fn a_failed_build_settles_the_pair() {
 async fn an_operator_ask_reinstates_a_settled_pair() {
 	TestDb::run(|mut conn, _url| async move {
 		let (_older, newer) = seed(&mut conn).await;
+		declare_builder(&mut conn, true).await;
 
 		record_build(&mut conn, newer, true).await;
 		assert!(
@@ -566,6 +568,64 @@ async fn the_check_closes_once_the_group_owes_no_schema() {
 			issues[0].message.contains("No reporting schema is owed"),
 			"the closing message says why: {}",
 			issues[0].message
+		);
+	})
+	.await;
+}
+
+/// A group nothing builds schemas for is owed none, so it presents no pairs
+/// even where its applications report published versions. Listing them would
+/// offer an operator a build nothing will pick up.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_group_with_no_builder_has_no_pairs() {
+	TestDb::run(|mut conn, _url| async move {
+		seed(&mut conn).await;
+
+		assert!(
+			pairs_for_group(&mut conn, group())
+				.await
+				.expect("pairs")
+				.is_empty(),
+			"no declaration covers the group, so it is owed no schema"
+		);
+
+		declare_builder(&mut conn, true).await;
+
+		assert_eq!(
+			pairs_for_group(&mut conn, group())
+				.await
+				.expect("pairs")
+				.len(),
+			2,
+			"declaring a builder is what brings the pairs into being"
+		);
+	})
+	.await;
+}
+
+/// A pair is unique per group and version. Two applications reporting one
+/// version are one pair, so the worklist dispatches one restore rather than
+/// one per application.
+#[tokio::test(flavor = "multi_thread")]
+async fn two_applications_on_one_version_are_one_pair() {
+	TestDb::run(|mut conn, _url| async move {
+		let (_older, newer) = seed(&mut conn).await;
+
+		conn.batch_execute(&format!(
+			"UPDATE application_reported_detail SET version = '2.60.0'
+			 WHERE application_id = '{FACILITY}'"
+		))
+		.await
+		.expect("put the facility on the central's version");
+
+		let versions = versions_for_group(&mut conn, group())
+			.await
+			.expect("derive versions");
+
+		assert_eq!(
+			versions.iter().filter(|v| v.id == newer).count(),
+			1,
+			"one pair, not one per reporting application: {versions:?}"
 		);
 	})
 	.await;

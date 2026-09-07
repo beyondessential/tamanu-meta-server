@@ -132,14 +132,17 @@ describe("asking for a build", () => {
 	});
 });
 
-describe("a group with nothing to build against", () => {
-	it("says why rather than showing an empty table", async () => {
+describe("a group with nothing to build", () => {
+	// Two different reasons reach the same empty answer: no builder is declared
+	// for the group, or nothing in it reports a published version. Naming both
+	// is what stops an operator reading an absent builder as a backlog.
+	it("names both reasons rather than showing an empty table", async () => {
 		stubApi([]);
 		render(<ReportingSchemasSection groupId={GROUP} />);
 
-		expect(
-			await screen.findByText(/no Tamanu application in this group reports a published version/i),
-		).toBeTruthy();
+		const empty = await screen.findByText(/nothing to build for this group/i);
+		expect(empty.textContent).toMatch(/no builder is declared/i);
+		expect(empty.textContent).toMatch(/reports a published version/i);
 		expect(screen.queryByText("Version")).toBeNull();
 	});
 });

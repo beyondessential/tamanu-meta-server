@@ -57,8 +57,9 @@ export default function ReportingSchemasSection({
 			<Paper variant="outlined" sx={{ p: 2 }} data-testid="reporting-schemas">
 				<SectionHeading />
 				<Typography variant="body2" color="text.secondary">
-					No Tamanu application in this group reports a published version, so
-					there is nothing to build a schema against.
+					Nothing to build for this group: either no builder is declared for it
+					under Backups, or no Tamanu application in it reports a published
+					version.
 				</Typography>
 			</Paper>
 		);

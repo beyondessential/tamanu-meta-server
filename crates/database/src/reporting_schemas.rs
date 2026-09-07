@@ -251,11 +251,17 @@ pub struct Pair {
 
 /// The pairs of a group: every published version its Tamanu applications report
 /// running, plus the version its open plan moves it to.
+///
+/// A group no enabled declaration covers has no pairs. Canopy owes it no
+/// schema, so listing versions against it would offer an operator a build
+/// nothing will pick up.
 // spec: RPT#pairs
 pub async fn pairs_for_group(db: &mut AsyncPgConnection, group: Uuid) -> Result<Vec<Pair>> {
-	let mut versions = versions_for_group(db, group).await?;
-	versions.sort_by_key(|v| (v.major, v.minor, v.patch));
-	versions.dedup_by_key(|v| v.id);
+	if !group_builds_schemas(db, group).await? {
+		return Ok(Vec::new());
+	}
+
+	let versions = versions_for_group(db, group).await?;
 
 	let mut pairs = Vec::with_capacity(versions.len());
 	for version in versions {
@@ -314,6 +320,13 @@ pub async fn versions_for_group(db: &mut AsyncPgConnection, group: Uuid) -> Resu
 	if let Some(target) = crate::upgrade_plans::planned_target(db, group).await? {
 		versions.push(target);
 	}
+
+	// A pair is unique per group and version, so two applications on one
+	// version are one pair, and a plan moving a group to a version something
+	// already runs adds none. Dispatch counts a restore and a migrate per
+	// entry, so a duplicate here is paid for rather than merely untidy.
+	versions.sort_by_key(|v| (v.major, v.minor, v.patch));
+	versions.dedup_by_key(|v| v.id);
 
 	Ok(versions)
 }
