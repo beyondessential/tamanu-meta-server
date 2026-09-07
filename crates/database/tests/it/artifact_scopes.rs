@@ -230,6 +230,54 @@ async fn two_groups_hold_their_own_of_the_same_kind() {
 	.await;
 }
 
+/// Each group is served its own, so the operator view marks both as offered.
+/// Deduplicating once across the fleet picks one and hides the other, which is
+/// the opposite of what an operator has to be able to see.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_operator_view_marks_every_group_s_own_as_offered() {
+	TestDb::run(|mut conn, _url| async move {
+		let version = seed_version(&mut conn, 2, 60, 0).await;
+		let one = seed_group(&mut conn, "kamaka").await;
+		let two = seed_group(&mut conn, "drifting").await;
+
+		Artifact::register(&mut conn, unscoped(version, "installer", "https://x/i.exe"))
+			.await
+			.expect("unscoped");
+		Artifact::register(&mut conn, held(version, "reporting-schema", one, b"one"))
+			.await
+			.expect("first group");
+		Artifact::register(&mut conn, held(version, "reporting-schema", two, b"two"))
+			.await
+			.expect("second group");
+
+		let all =
+			Artifact::get_for_version_all_matches_with_metadata(&mut conn, version, Scope::Fleet)
+				.await
+				.expect("operator view");
+
+		assert_eq!(all.len(), 3);
+		for (artifact, _, _, offered) in all {
+			assert!(
+				offered,
+				"{} for {:?} is served to someone",
+				artifact.artifact_type, artifact.group_id
+			);
+		}
+	})
+	.await;
+}
+
+/// The digest is a prefixed sha256 of the bytes. Pinned against a known answer
+/// rather than against `digest_of` of the same input, which would hold just as
+/// well if the function returned a constant.
+#[test]
+fn the_digest_is_a_prefixed_sha256() {
+	assert_eq!(
+		digest_of(b""),
+		"sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+	);
+}
+
 /// A range artifact registered twice replaces itself. Before the identity
 /// index this could not hold: `version_id` is NULL for every range artifact,
 /// and the default treatment of NULL made each row distinct from the last.

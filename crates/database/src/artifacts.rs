@@ -201,8 +201,8 @@ impl Artifact {
 	fn sort_by_specificity(artifacts: &mut [Self]) {
 		artifacts.sort_by(|a, b| {
 			// An artifact scoped to the caller's group is more specific than one
-			// belonging to no group. Only one group's artifacts are ever in
-			// play here, except under `Scope::Fleet`, which is never deduplicated.
+			// belonging to no group. A deduplicating read resolves one scope, so
+			// only one group's artifacts are ever in play here.
 			let a_is_scoped = a.group_id.is_some();
 			let b_is_scoped = b.group_id.is_some();
 
@@ -340,10 +340,18 @@ impl Artifact {
 			.first(db)
 			.await
 			.map_err(AppError::from)?;
-		if scoped.is_some() && new_url.is_some() {
-			return Err(AppError::Conflict(
-				"an artifact Canopy holds has no download URL".into(),
-			));
+		match (scoped.is_some(), new_url.is_some()) {
+			(true, true) => {
+				return Err(AppError::Conflict(
+					"an artifact Canopy holds has no download URL".into(),
+				));
+			}
+			(false, false) => {
+				return Err(AppError::Conflict(
+					"an artifact Canopy does not hold needs a download URL".into(),
+				));
+			}
+			_ => {}
 		}
 
 		diesel::update(artifacts.filter(id.eq(artifact_id)))
@@ -381,9 +389,30 @@ impl Artifact {
 		let matching_artifacts =
 			Self::get_for_version_all_matches(db, target_version_id, scope).await?;
 
-		let public_api_artifacts = Self::get_for_version(db, target_version_id, scope).await?;
-		let public_api_ids: std::collections::HashSet<Uuid> =
-			public_api_artifacts.iter().map(|a| a.id).collect();
+		// An artifact is offered where it wins inside a scope that is actually
+		// resolved, so the fleet-wide answer is the union over the unscoped read
+		// and each group present rather than one deduplication across them all:
+		// two groups' artifacts of one type and platform are both served.
+		// spec: ART#what-a-version-offers
+		let scopes: Vec<Scope> = match scope {
+			Scope::Fleet => {
+				let mut groups: Vec<Uuid> =
+					matching_artifacts.iter().filter_map(|a| a.group_id).collect();
+				groups.sort_unstable();
+				groups.dedup();
+				std::iter::once(Scope::Unscoped)
+					.chain(groups.into_iter().map(Scope::Group))
+					.collect()
+			}
+			resolved => vec![resolved],
+		};
+
+		let mut public_api_ids: std::collections::HashSet<Uuid> = std::collections::HashSet::new();
+		for scope in scopes {
+			for offered in Self::get_for_version(db, target_version_id, scope).await? {
+				public_api_ids.insert(offered.id);
+			}
+		}
 
 		use crate::schema::artifacts::*;
 		let all_artifacts: Vec<Self> = table.select(Self::as_select()).load(db).await?;
