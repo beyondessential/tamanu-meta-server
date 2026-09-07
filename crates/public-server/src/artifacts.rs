@@ -251,32 +251,44 @@ async fn create(
 		.and_then(|v| v.to_str().ok())
 		.map(str::to_owned);
 
-	let row =
-		ArtifactRow::register(
-			&mut db,
-			NewArtifact {
-				version_id,
-				platform,
-				artifact_type,
-				download_url: match held {
-					None => Some(String::from_utf8(body.to_vec()).map_err(|_| {
-						AppError::BadRequest("download URL is not valid UTF-8".into())
-					})?),
-					Some(_) => None,
-				},
-				device_id: Some(device_id),
-				version_range_pattern,
-				group_id: held,
-				// Canopy verifies the bytes against the digest as they arrive, so it
-				// records the digest of what it actually took in.
-				// spec: ART#digests
-				digest: held.map(|_| digest_of(&body)),
-				content: held.map(|_| body.to_vec()),
-				content_type: held.and(content_type),
-				run_id: scope.run,
-			},
-		)
-		.await?;
+	let download_url = match held {
+		None => {
+			let url = String::from_utf8(body.to_vec())
+				.map_err(|_| AppError::BadRequest("download URL is not valid UTF-8".into()))?;
+			// A blank body is no location at all. The constraint only tests for
+			// NULL, so an empty string would pass it and leave an artifact
+			// nothing can be fetched from.
+			// spec: ART#where-an-artifact-rests
+			if url.trim().is_empty() {
+				return Err(AppError::BadRequest(
+					"an artifact needs a download URL".into(),
+				));
+			}
+			Some(url)
+		}
+		Some(_) => None,
+	};
+
+	let row = ArtifactRow::register(
+		&mut db,
+		NewArtifact {
+			version_id,
+			platform,
+			artifact_type,
+			download_url,
+			device_id: Some(device_id),
+			version_range_pattern,
+			group_id: held,
+			// Canopy verifies the bytes against the digest as they arrive, so it
+			// records the digest of what it actually took in.
+			// spec: ART#digests
+			digest: held.map(|_| digest_of(&body)),
+			content: held.map(|_| body.to_vec()),
+			content_type: held.and(content_type),
+			run_id: scope.run,
+		},
+	)
+	.await?;
 
 	let base = crate::versions::public_base_url(&headers);
 	Ok(Json(Artifact::offered(row, &base, &version)))

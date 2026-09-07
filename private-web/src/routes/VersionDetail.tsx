@@ -653,10 +653,15 @@ function EditArtifactRow({
 /// JSON body, so the file is read here rather than posted as a multipart form.
 async function encodeFile(file: File): Promise<string> {
 	const buffer = new Uint8Array(await file.arrayBuffer());
-	let binary = "";
-	for (const byte of buffer) binary += String.fromCharCode(byte);
-	return btoa(binary);
+	const chunks: string[] = [];
+	for (let i = 0; i < buffer.length; i += 0x8000) {
+		chunks.push(String.fromCharCode(...buffer.subarray(i, i + 0x8000)));
+	}
+	return btoa(chunks.join(""));
 }
+
+const MAX_HELD_ARTIFACT_BYTES = 32 * 1024 * 1024;
+const OVER_LIMIT_MESSAGE = `Artifact is larger than the ${MAX_HELD_ARTIFACT_BYTES / (1024 * 1024)} MiB limit`;
 
 function CreateArtifactForm({
 	versionId,
@@ -670,6 +675,7 @@ function CreateArtifactForm({
 	const [url, setUrl] = useState("");
 	const [groupId, setGroupId] = useState("");
 	const [file, setFile] = useState<File | null>(null);
+	const [fileError, setFileError] = useState<string | null>(null);
 	const action = useApiAction("versions", "create_artifact");
 	const groups = useApi("fleet/groups", "list", {}, []);
 
@@ -692,6 +698,7 @@ function CreateArtifactForm({
 			setUrl("");
 			setGroupId("");
 			setFile(null);
+			setFileError(null);
 			onCreated();
 		} catch {
 			/* surfaced via action.error */
@@ -756,7 +763,15 @@ function CreateArtifactForm({
 							<input
 								type="file"
 								hidden
-								onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+								onChange={(e) => {
+									const chosen = e.target.files?.[0] ?? null;
+									setFile(chosen);
+									setFileError(
+										chosen && chosen.size > MAX_HELD_ARTIFACT_BYTES
+											? OVER_LIMIT_MESSAGE
+											: null,
+									);
+								}}
 							/>
 						</Button>
 					) : (
@@ -773,14 +788,14 @@ function CreateArtifactForm({
 					<Button
 						type="submit"
 						variant="contained"
-						disabled={action.pending || (scoped && !file)}
+						disabled={action.pending || (scoped && !file) || fileError !== null}
 					>
 						{action.pending ? "Creating…" : "Create"}
 					</Button>
 				</Stack>
-				{action.error && (
+				{(fileError ?? action.error?.message) && (
 					<Alert severity="error" sx={{ mt: 1 }}>
-						{action.error.message}
+						{fileError ?? action.error?.message}
 					</Alert>
 				)}
 			</Box>

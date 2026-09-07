@@ -355,4 +355,46 @@ test.describe("group-scoped artifacts", () => {
 		await expect(page.getByText("Could not load groups")).toBeVisible();
 		await expect(page.getByRole("combobox", { name: "Group" })).toBeDisabled();
 	});
+
+	/// A file past what Canopy will hold is refused with the size named, before
+	/// it is read and encoded: base64 of an oversized file locks the tab up for
+	/// a request the server was always going to refuse.
+	///
+	/// spec: ART#where-an-artifact-rests
+	test("a file over the limit is refused with the limit named", async ({
+		page,
+		sql,
+	}) => {
+		await seedVersion(sql, {
+			major: 2,
+			minor: 60,
+			patch: 0,
+			status: "published",
+		});
+		await seedServerGroup(sql, { name: "kamaka" });
+
+		await page.goto(`/versions/2.60.0`);
+		await page.getByRole("button", { name: "Unlock" }).click();
+		await page.getByRole("button", { name: "Create" }).click();
+
+		await page.getByRole("textbox", { name: "Type" }).fill("reporting-schema");
+		await page.getByRole("textbox", { name: "Platform" }).fill("any");
+		await page.getByRole("combobox", { name: "Group" }).click();
+		await page.getByRole("option", { name: "kamaka" }).click();
+		await page.getByLabel("Choose file…").setInputFiles({
+			name: "kamaka.sql",
+			mimeType: "application/sql",
+			buffer: Buffer.alloc(32 * 1024 * 1024 + 1),
+		});
+
+		await expect(
+			page.getByText("Artifact is larger than the 32 MiB limit"),
+		).toBeVisible();
+		await expect(
+			page.locator("form").getByRole("button", { name: "Create" }),
+		).toBeDisabled();
+
+		const rows = await sql.query("SELECT id FROM artifacts");
+		expect(rows).toHaveLength(0);
+	});
 });

@@ -270,3 +270,128 @@ async fn a_blank_download_url_is_not_a_location() {
 	})
 	.await
 }
+
+/// The create route carries a body limit sized from the held-bytes cap, so an
+/// upload well past axum's 2 MB default is accepted, and one past the cap is
+/// refused by the handler naming the limit rather than by axum with a
+/// plain-text 413 the SPA has nothing structured to render.
+// spec: ART#where-an-artifact-rests
+#[tokio::test(flavor = "multi_thread")]
+async fn an_upload_over_the_limit_is_told_what_it_is() {
+	commons_tests::server::run(async |mut conn, _public, private| {
+		let version = "ffffffff-0000-0000-0000-ffffffffffff";
+		let group = "ffffffff-1111-1111-1111-ffffffffffff";
+
+		conn.batch_execute(&format!(
+			"INSERT INTO versions (id, major, minor, patch, changelog, status)
+			 VALUES ('{version}', 2, 60, 0, '', 'published');
+			 INSERT INTO server_groups (id, name) VALUES ('{group}', 'kamaka')",
+		))
+		.await
+		.unwrap();
+
+		// "AAAA" decodes to three zero bytes, so the repeat count sets the size.
+		let four_mib = "A".repeat(4 * (4 * 1024 * 1024 / 3));
+		let accepted = private
+			.post("/api/versions/create_artifact")
+			.json(&serde_json::json!({
+				"version_id": version,
+				"artifact_type": "reporting-schema",
+				"platform": "any",
+				"group_id": group,
+				"content_base64": four_mib,
+			}))
+			.await;
+		accepted.assert_status_ok();
+
+		let over_limit = "A".repeat(4 * (32 * 1024 * 1024 / 3 + 1));
+		let refused = private
+			.post("/api/versions/create_artifact")
+			.json(&serde_json::json!({
+				"version_id": version,
+				"artifact_type": "reporting-schema",
+				"platform": "linux",
+				"group_id": group,
+				"content_base64": over_limit,
+			}))
+			.await;
+
+		assert_eq!(refused.status_code(), axum::http::StatusCode::BAD_REQUEST);
+		let problem: serde_json::Value = refused.json();
+		assert!(
+			problem["title"]
+				.as_str()
+				.expect("a problem-details title")
+				.contains("32 MiB"),
+			"the refusal names the limit, but got: {problem}"
+		);
+	})
+	.await
+}
+
+/// The listing's offered flag, over the wire. An artifact is offered where it
+/// wins inside a scope that is actually resolved, so an unscoped artifact and
+/// the group's own that displaces it are both served, to different callers, and
+/// both say so. A range the exact displaces inside one scope is served to
+/// nobody.
+// spec: ART#what-a-version-offers
+#[tokio::test(flavor = "multi_thread")]
+async fn the_listing_says_which_artifacts_are_offered() {
+	commons_tests::server::run(async |mut conn, _public, private| {
+		let version = "11111111-2222-0000-0000-111111111111";
+		let group = "11111111-3333-0000-0000-111111111111";
+		let unscoped_schema = "11111111-4444-0000-0000-111111111111";
+		let group_schema = "11111111-5555-0000-0000-111111111111";
+		let exact_installer = "11111111-6666-0000-0000-111111111111";
+		let range_installer = "11111111-7777-0000-0000-111111111111";
+
+		conn.batch_execute(&format!(
+			"INSERT INTO versions (id, major, minor, patch, changelog, status)
+			 VALUES ('{version}', 2, 60, 0, '', 'published');
+			 INSERT INTO server_groups (id, name) VALUES ('{group}', 'kamaka');
+
+			 INSERT INTO artifacts (id, version_id, platform, artifact_type, download_url)
+			 VALUES ('{unscoped_schema}', '{version}', 'any', 'reporting-schema', 'https://example.com/all.sql'),
+			        ('{exact_installer}', '{version}', 'windows', 'installer', 'https://example.com/exact.exe');
+
+			 INSERT INTO artifacts (id, version_id, platform, artifact_type, version_range_pattern, download_url)
+			 VALUES ('{range_installer}', NULL, 'windows', 'installer', '2.60.x', 'https://example.com/range.exe');
+
+			 INSERT INTO artifacts (id, version_id, platform, artifact_type, group_id, content, content_type, digest)
+			 VALUES ('{group_schema}', '{version}', 'any', 'reporting-schema', '{group}', 'kamaka schema', 'application/sql', 'sha256:x')",
+		))
+		.await
+		.unwrap();
+
+		let response = private
+			.post("/api/versions/get_version_artifacts")
+			.json(&serde_json::json!({ "version": "2.60.0" }))
+			.await;
+		response.assert_status_ok();
+		let artifacts: Vec<serde_json::Value> = response.json();
+
+		let offered = |id: &str| -> bool {
+			artifacts
+				.iter()
+				.find(|a| a["id"] == id)
+				.unwrap_or_else(|| panic!("{id} is listed"))["is_used_in_public_api"]
+				.as_bool()
+				.expect("a flag")
+		};
+
+		assert!(
+			offered(group_schema),
+			"the group is offered the one held for it"
+		);
+		assert!(
+			offered(unscoped_schema),
+			"every other group is still offered the unscoped one"
+		);
+		assert!(offered(exact_installer), "the exact wins its own scope");
+		assert!(
+			!offered(range_installer),
+			"the range it displaces is served to nobody"
+		);
+	})
+	.await
+}

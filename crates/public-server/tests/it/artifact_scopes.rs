@@ -598,3 +598,51 @@ async fn an_admin_device_registers_for_any_group() {
 	)
 	.await
 }
+
+/// A registration carrying no location, and one naming a group that is not a
+/// group at all, are both the registrant's own mistake and are refused as one.
+/// A blank body would otherwise pass the constraint, which only tests for NULL,
+/// and leave an artifact nothing can be fetched from.
+// spec: ART#registration, ART#where-an-artifact-rests
+#[tokio::test(flavor = "multi_thread")]
+async fn a_registration_with_nothing_in_it_is_refused() {
+	commons_tests::server::run_with_device_auth(
+		"releaser",
+		async |mut conn, cert, _device_id, public, _| {
+			seed(&mut conn).await;
+
+			for body in ["", "   "] {
+				let response = public
+					.post("/artifacts/2.60.0/installer/windows")
+					.add_header("x-forwarded-client-cert", &format!("Cert={cert}"))
+					.text(body)
+					.await;
+				assert_eq!(
+					response.status_code(),
+					StatusCode::BAD_REQUEST,
+					"a body of {body:?} is no location"
+				);
+			}
+
+			let malformed = public
+				.post("/artifacts/2.60.0/installer/windows?group=not-a-uuid")
+				.add_header("x-forwarded-client-cert", &format!("Cert={cert}"))
+				.text("https://example.com/x.exe")
+				.await;
+			assert_eq!(
+				malformed.status_code(),
+				StatusCode::BAD_REQUEST,
+				"a group that is not a uuid is a client mistake, not a 500"
+			);
+
+			// Nothing was written by any of them.
+			let listed = public.get("/versions/2.60.0/artifacts").await;
+			let artifacts: Vec<serde_json::Value> = listed.json();
+			assert!(
+				!artifacts.iter().any(|a| a["artifact_type"] == "installer"),
+				"nothing blank or malformed was registered"
+			);
+		},
+	)
+	.await
+}
