@@ -181,4 +181,62 @@ test.describe("group inventory", () => {
 		await expect(production.getByText(/upgrading to v2\.55/)).toBeVisible();
 		await expect(production.getByTestId("inventory-application")).toHaveCount(0);
 	});
+
+	test("gives the line a run on the environment is started with", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "kamaka", tags: {} });
+		await seedServer(sql, {
+			name: "kamaka-prod-central",
+			type: "tamanu-central",
+			rank: "production",
+			groupId: group.id,
+			tags: {},
+		});
+
+		await page.goto(`/fleet/groups/${group.id}`);
+		const production = page
+			.getByTestId("group-inventory")
+			.getByTestId("environment-production");
+
+		// Canopy's address and the environment's identity are filled in; the
+		// playbook is the operator's to pick.
+		await expect(production.getByTestId("run-command")).toContainText(
+			"CANOPY_GROUP=kamaka CANOPY_RANK=production ansible-playbook -i inventory/canopy.yml <playbook>",
+		);
+		await expect(production.getByTestId("run-command")).toContainText(
+			`CANOPY_URL=${new URL(page.url()).origin}`,
+		);
+	});
+
+	test("declares the work from beside the line", async ({ page, sql }) => {
+		const group = await seedServerGroup(sql, { name: "drifting", tags: {} });
+		await seedServer(sql, {
+			name: "drifting-prod-central",
+			type: "tamanu-central",
+			rank: "production",
+			groupId: group.id,
+			tags: {},
+		});
+
+		await page.goto(`/fleet/groups/${group.id}`);
+		const production = page
+			.getByTestId("group-inventory")
+			.getByTestId("environment-production");
+
+		await production.getByTestId("declare-work").click();
+		await expect(
+			page.getByRole("heading", { name: "Declare maintenance — drifting" }),
+		).toBeVisible();
+		await page.getByRole("button", { name: "Declare", exact: true }).click();
+
+		// The window is the reader's own, so the inventory is still served and
+		// the panel says the run is held for them.
+		await expect(production.getByTestId("run-declared")).toContainText(
+			"Your work is declared",
+		);
+		await expect(production.getByTestId("declare-work")).toHaveCount(0);
+		await expect(production.getByTestId("inventory-application")).toHaveCount(1);
+	});
 });

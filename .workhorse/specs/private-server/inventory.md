@@ -112,6 +112,9 @@ An operator reads there what a run would receive, with a value inherited from th
 A secret variable appears by name, with the scope it is set at and when it last changed, and never its value.
 While a window someone else declared holds over the environment, the presentation says a run would be refused and names the window, so an operator reads why a run is being held without starting one.
 
+The presentation also gives the invocation a run on the environment is started with, filled in with Canopy's address and the environment's identity, so an operator copies what to run rather than composing it.
+Declaring the work is offered beside it, an environment being served to the operator whose window holds over it, so declaring and starting are one place rather than two.
+
 ## Out of scope
 
 - Performing a configuration run, scheduling one, or triggering one.

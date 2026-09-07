@@ -1,9 +1,12 @@
+import BuildOutlinedIcon from "@mui/icons-material/BuildOutlined";
+import ContentCopyIcon from "@mui/icons-material/ContentCopy";
 import DeleteIcon from "@mui/icons-material/Delete";
 import {
 	Alert,
 	Box,
 	Button,
 	Chip,
+	IconButton,
 	LinearProgress,
 	MenuItem,
 	Paper,
@@ -15,9 +18,15 @@ import {
 import { useState } from "react";
 import { useApi, useApiAction } from "../api";
 import { useIsAdmin } from "../hooks/useIsAdmin";
-import type { InventorySecretVariable, ServerRank } from "../types";
+import type {
+	InventorySecretVariable,
+	MaintenanceWindow,
+	ServerRank,
+} from "../types";
 import { SERVER_RANK_ORDER } from "../types";
 import ApplicationTypeChip from "./ApplicationTypeChip";
+import DeclareMaintenanceDialog from "./DeclareMaintenanceDialog";
+import TimeAgo from "./TimeAgo";
 
 /// What a configuration run receives for each of this group's environments:
 /// the applications it would act on, the address each is reached at, and the
@@ -134,6 +143,8 @@ function EnvironmentInventory({
 
 			{isAdmin && inventory.status === "ok" && (
 				<Stack spacing={2} sx={{ mt: 1 }}>
+					<Run groupId={groupId} group={inventory.data.group} rank={rank} />
+
 					<Box>
 						<Typography variant="body2" color="text.secondary" gutterBottom>
 							Environment variables, carried by every application below
@@ -189,6 +200,120 @@ function EnvironmentInventory({
 				</Stack>
 			)}
 		</Paper>
+	);
+}
+
+/// The invocation a run on this environment is started with, filled in with
+/// canopy's address and the environment's identity, and the declaration that
+/// makes the environment the operator's to run on.
+// spec: INV#presentation
+function Run({
+	groupId,
+	group,
+	rank,
+}: {
+	groupId: string;
+	group: string;
+	rank: ServerRank;
+}) {
+	const [copied, setCopied] = useState(false);
+	const [dialogOpen, setDialogOpen] = useState(false);
+	const [tick, setTick] = useState(0);
+	const windows = useApi(
+		"maintenance",
+		"for_target",
+		{ server_group_id: groupId },
+		[groupId, tick],
+	);
+
+	// The inventory is refused while a window someone else declared holds, so
+	// one holding here is the operator's own.
+	const declared =
+		windows.status === "ok"
+			? ((windows.data as MaintenanceWindow[]).find(
+					(held) => held.ended_at === null,
+				) ?? null)
+			: null;
+
+	const command = `CANOPY_URL=${window.location.origin} CANOPY_GROUP=${group} CANOPY_RANK=${rank} ansible-playbook -i inventory/canopy.yml <playbook>`;
+
+	const copy = async () => {
+		try {
+			await navigator.clipboard.writeText(command);
+			setCopied(true);
+			window.setTimeout(() => setCopied(false), 2000);
+		} catch {
+			/* clipboard may be unavailable; the line is on the page */
+		}
+	};
+
+	return (
+		<Box data-testid="inventory-run">
+			<Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
+				<Typography variant="body2" color="text.secondary">
+					Run
+				</Typography>
+				<Tooltip title={copied ? "Copied" : "Copy the command"}>
+					<IconButton size="small" onClick={copy} aria-label="Copy the command">
+						<ContentCopyIcon fontSize="small" />
+					</IconButton>
+				</Tooltip>
+			</Stack>
+			<Box
+				component="pre"
+				data-testid="run-command"
+				sx={{
+					m: 0,
+					p: 1.5,
+					borderRadius: 1,
+					bgcolor: "action.hover",
+					overflow: "auto",
+					fontSize: "0.85em",
+					fontFamily: "monospace",
+					whiteSpace: "pre-wrap",
+					wordBreak: "break-all",
+				}}
+			>
+				{command}
+			</Box>
+			{declared ? (
+				<Typography
+					variant="caption"
+					color="text.secondary"
+					sx={{ display: "block", mt: 1 }}
+					data-testid="run-declared"
+				>
+					Your work is declared until{" "}
+					<TimeAgo timestamp={declared.expected_end} />, so this inventory is
+					served to your run and refused to anyone else's.
+				</Typography>
+			) : (
+				<Stack spacing={0.5} sx={{ mt: 1, alignItems: "flex-start" }}>
+					<Button
+						size="small"
+						variant="outlined"
+						startIcon={<BuildOutlinedIcon />}
+						onClick={() => setDialogOpen(true)}
+						data-testid="declare-work"
+					>
+						Declare the work
+					</Button>
+					<Typography variant="caption" color="text.secondary">
+						Declare it before running, and the inventory is refused to a second
+						operator until you lift it.
+					</Typography>
+				</Stack>
+			)}
+			<DeclareMaintenanceDialog
+				open={dialogOpen}
+				onClose={() => setDialogOpen(false)}
+				scope="group"
+				id={groupId}
+				targetLabel={group}
+				prefill={{ note: `configuring ${rank}` }}
+				onDone={() => setTick((n) => n + 1)}
+			/>
+		</Box>
 	);
 }
 
