@@ -57,6 +57,7 @@ Membership evaluation is asynchronous. A report records its issue state immediat
 
 Operators are notified over the notification channel: a group's incidents and those of every environment in it to the group's configured channel, Canopy-wide incidents to the operator channel.
 Wherever an incident's target is named, an environment reads as its group's name with its rank after it, and a production environment reads as the group's name alone, so a site's production trouble is announced under the site and its lesser environments under their rank.
+On the group's own surface the group's name is already the heading, so an environment there reads by its rank alone and the group's own incident carries no rank, which is what keeps a production environment's incident distinguishable from the group's beside it.
 
 An incident notifies when it has stayed open past its target's grace period; the notification additionally waits out any lingering, so it is sent only while an effective failure is live.
 An incident that closes before its notification was sent never notifies.
