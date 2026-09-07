@@ -8,6 +8,7 @@ import {
 	seedRestoreReplica,
 	seedServer,
 	seedServerGroup,
+	seedUpgradePlan,
 	seedVersion,
 } from "./seed";
 import { expect, test } from "./test-fixtures";
@@ -148,6 +149,46 @@ test.describe("reporting schemas", () => {
 		await expect(section).toBeVisible();
 		await expect(section.getByTestId("reporting-schema-row")).toHaveCount(0);
 		await expect(section.getByText(/no builder is declared/i)).toBeVisible();
+	});
+
+	/// A group is owed a schema for where it is going as well as where it is:
+	/// the version its open plan moves it to is a pair before anything runs it,
+	/// so the schema is there when the upgrade lands rather than being built
+	/// after it.
+	///
+	/// spec: RPT#pairs
+	test("an open upgrade plan contributes a pair", async ({ page, sql }) => {
+		await seedVersion(sql, { major: 2, minor: 59, patch: 0, status: "published" });
+		const target = await seedVersion(sql, {
+			major: 2,
+			minor: 60,
+			patch: 0,
+			status: "published",
+		});
+		const group = await seedServerGroup(sql, { name: "kamaka" });
+		await declareBuilder(sql, group.id);
+
+		const central = await seedServer(sql, {
+			name: "central",
+			groupId: group.id,
+			type: "tamanu-central",
+		});
+		await seedApplicationReport(sql, {
+			applicationId: central.id,
+			version: "2.59.0",
+		});
+		await seedUpgradePlan(sql, {
+			groupId: group.id,
+			targetVersionId: target.id,
+			plannedFor: "2026-12-01",
+		});
+
+		await page.goto(`/groups/${group.id}`);
+
+		const section = page.getByTestId("reporting-schemas");
+		await expect(section.getByTestId("reporting-schema-row")).toHaveCount(2);
+		await expect(section.getByText("2.59.0")).toBeVisible();
+		await expect(section.getByText("2.60.0")).toBeVisible();
 	});
 
 	/// A built pair and a failed one read differently on the screen, and the
