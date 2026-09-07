@@ -7965,6 +7965,12 @@ export interface components {
         };
         /** @description One pair of group and Tamanu version, and where it stands. */
         Pair: {
+            /**
+             * @description The group's Tamanu applications reporting this version, by name. Empty
+             *     where the pair comes from the open plan rather than from something
+             *     running it.
+             */
+            applications: string[];
             /** @description What went wrong, where a build failed. */
             error?: string | null;
             /**

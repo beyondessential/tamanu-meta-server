@@ -756,3 +756,82 @@ async fn a_newer_snapshot_does_not_unsettle_a_pair() {
 	})
 	.await;
 }
+
+/// A pair names the applications on its version. One row stands for every
+/// application running it, and a row that names none leaves an operator reading
+/// a bare version string against a group of eight servers.
+///
+/// spec: RPT#pairs
+#[tokio::test(flavor = "multi_thread")]
+async fn a_pair_names_the_applications_on_its_version() {
+	TestDb::run(|mut conn, _url| async move {
+		let (older, newer) = seed(&mut conn).await;
+		declare_builder(&mut conn, true).await;
+
+		let pairs = pairs_for_group(&mut conn, group()).await.expect("pairs");
+		let named = |version: Uuid| {
+			pairs
+				.iter()
+				.find(|p| p.version_id == version)
+				.map(|p| p.applications.clone())
+				.expect("the pair")
+		};
+
+		assert_eq!(named(newer), vec!["central".to_owned()]);
+		assert_eq!(named(older), vec!["facility".to_owned()]);
+
+		// Two applications on one version are one pair, and the row has to
+		// account for both of them rather than for whichever was read last.
+		conn.batch_execute(&format!(
+			"UPDATE application_reported_detail SET version = '2.60.0'
+			 WHERE application_id = '{FACILITY}'"
+		))
+		.await
+		.expect("move the facility onto the central's version");
+
+		let pairs = pairs_for_group(&mut conn, group()).await.expect("pairs");
+		let both = pairs
+			.iter()
+			.find(|p| p.version_id == newer)
+			.expect("the pair");
+		assert_eq!(
+			both.applications,
+			vec!["central".to_owned(), "facility".to_owned()]
+		);
+	})
+	.await;
+}
+
+/// A version only an open plan contributes has nothing running it, so the pair
+/// names no applications rather than borrowing the ones on another version.
+///
+/// spec: RPT#pairs
+#[tokio::test(flavor = "multi_thread")]
+async fn a_planned_pair_names_no_applications() {
+	TestDb::run(|mut conn, _url| async move {
+		let (_older, newer) = seed(&mut conn).await;
+		declare_builder(&mut conn, true).await;
+
+		conn.batch_execute(&format!(
+			"UPDATE application_reported_detail SET version = '2.59.0';
+
+			 INSERT INTO upgrade_plans (group_id, target_version_id, created_by)
+			 VALUES ('{GROUP}', '{newer}', 'seed@bes.au')"
+		))
+		.await
+		.expect("plan the upgrade");
+
+		let pairs = pairs_for_group(&mut conn, group()).await.expect("pairs");
+		let planned = pairs
+			.iter()
+			.find(|p| p.version_id == newer)
+			.expect("the plan's target is a pair");
+
+		assert!(
+			planned.applications.is_empty(),
+			"nothing runs it: {:?}",
+			planned.applications
+		);
+	})
+	.await;
+}

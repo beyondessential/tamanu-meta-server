@@ -14125,9 +14125,17 @@
           "version_id",
           "version",
           "state",
-          "requested"
+          "requested",
+          "applications"
         ],
         "properties": {
+          "applications": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The group's Tamanu applications reporting this version, by name. Empty\nwhere the pair comes from the open plan rather than from something\nrunning it."
+          },
           "error": {
             "type": [
               "string",

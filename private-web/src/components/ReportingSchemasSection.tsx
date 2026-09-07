@@ -87,6 +87,7 @@ export default function ReportingSchemasSection({
 					<TableRow>
 						<TableCell>Version</TableCell>
 						<TableCell>Schema</TableCell>
+						<TableCell>On</TableCell>
 						<TableCell />
 					</TableRow>
 				</TableHead>
@@ -98,6 +99,9 @@ export default function ReportingSchemasSection({
 							</TableCell>
 							<TableCell>
 								<StateChip state={pair.state as PairState} error={pair.error} />
+							</TableCell>
+							<TableCell>
+								<Running applications={pair.applications} />
 							</TableCell>
 							<TableCell align="right">
 								{pair.requested ? (
@@ -119,6 +123,31 @@ export default function ReportingSchemasSection({
 				</TableBody>
 			</Table>
 		</Paper>
+	);
+}
+
+/// Which of the group's applications a pair covers.
+///
+/// A pair is per version, so one row stands for every application on it. The
+/// count is what an operator sizes the row by; the names are behind it because
+/// a group of any size would otherwise make the table taller than it is wide.
+function Running({ applications }: { applications: string[] }) {
+	if (applications.length === 0) {
+		return (
+			<Typography variant="caption" color="text.secondary">
+				upgrade plan
+			</Typography>
+		);
+	}
+
+	return (
+		<Tooltip title={applications.join(", ")}>
+			<Typography variant="body2" sx={{ textDecoration: "underline dotted" }}>
+				{applications.length === 1
+					? "1 server"
+					: `${applications.length} servers`}
+			</Typography>
+		</Tooltip>
 	);
 }
 

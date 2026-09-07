@@ -93,6 +93,15 @@ test.describe("reporting schemas", () => {
 
 		// Nothing has been built yet, so both are awaiting one.
 		await expect(section.getByText("Awaiting build")).toHaveCount(2);
+
+		// A version string alone does not say which servers the row covers, and
+		// the group page carries no running version anywhere else.
+		const older = section
+			.getByTestId("reporting-schema-row")
+			.filter({ hasText: "2.59.0" });
+		await expect(older.getByText("1 server")).toBeVisible();
+		await older.getByText("1 server").hover();
+		await expect(page.getByRole("tooltip")).toHaveText("facility");
 	});
 
 	/// An operator asking for a build is what reinstates a pair, so the ask has

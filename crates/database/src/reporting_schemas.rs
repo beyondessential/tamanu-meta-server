@@ -247,6 +247,10 @@ pub struct Pair {
 	pub error: Option<String>,
 	/// Whether an operator has asked for this pair to be built again.
 	pub requested: bool,
+	/// The group's Tamanu applications reporting this version, by name. Empty
+	/// where the pair comes from the open plan rather than from something
+	/// running it.
+	pub applications: Vec<String>,
 }
 
 /// The pairs of a group: every published version its Tamanu applications report
@@ -262,6 +266,7 @@ pub async fn pairs_for_group(db: &mut AsyncPgConnection, group: Uuid) -> Result<
 	}
 
 	let versions = versions_for_group(db, group).await?;
+	let running = applications_by_version(db, group).await?;
 
 	let mut pairs = Vec::with_capacity(versions.len());
 	for version in versions {
@@ -274,10 +279,12 @@ pub async fn pairs_for_group(db: &mut AsyncPgConnection, group: Uuid) -> Result<
 			Some(build) => (PairState::Failed, build.error.clone()),
 		};
 
+		let version_str = version.as_semver().to_string();
 		pairs.push(Pair {
 			group_id: group,
 			version_id: version.id,
-			version: version.as_semver().to_string(),
+			applications: running.get(&version_str).cloned().unwrap_or_default(),
+			version: version_str,
 			state,
 			error,
 			requested,
@@ -285,6 +292,42 @@ pub async fn pairs_for_group(db: &mut AsyncPgConnection, group: Uuid) -> Result<
 	}
 
 	Ok(pairs)
+}
+
+/// Which of a group's Tamanu applications report each version, by name.
+///
+/// A pair is per version, so the row an operator reads covers every application
+/// on that version and names none of them without this.
+// spec: RPT#pairs
+async fn applications_by_version(
+	db: &mut AsyncPgConnection,
+	group: Uuid,
+) -> Result<std::collections::HashMap<String, Vec<String>>> {
+	let applications = crate::applications::Application::list_live_in_group(db, group).await?;
+	let tamanu: Vec<&crate::applications::Application> = applications
+		.iter()
+		.filter(|a| a.r#type.software() == "tamanu")
+		.collect();
+
+	let ids: Vec<Uuid> = tamanu.iter().map(|a| a.id).collect();
+	let reported = crate::reported_detail::ReportedDetail::last_versions(db, &ids).await?;
+
+	let mut by_version: std::collections::HashMap<String, Vec<String>> =
+		std::collections::HashMap::new();
+	for application in tamanu {
+		let Some(version) = reported.get(&application.id) else {
+			continue;
+		};
+		by_version
+			.entry(version.to_string())
+			.or_default()
+			.push(application.label());
+	}
+	for names in by_version.values_mut() {
+		names.sort();
+	}
+
+	Ok(by_version)
 }
 
 /// Every published version a group's Tamanu applications report running, plus
