@@ -98,7 +98,15 @@ function MachineBlock({
 					maintained={machine.maintained}
 					settling={machine.maintenance_settling}
 					ownWindow={machine.own_window}
-					describes={applications.map(applicationName)}
+					describes={applications.map((application) =>
+						[
+							applicationName(application),
+							application.own_window ? "under maintenance" : null,
+							application.is_monitored === false ? "unmonitored" : null,
+						]
+							.filter(Boolean)
+							.join(" · "),
+					)}
 				>
 					{applications.map((application) => (
 						<Box key={application.id} component="span" sx={dotCellSx}>
@@ -107,10 +115,7 @@ function MachineBlock({
 								health={application.health ?? undefined}
 								monitored={application.is_monitored !== false}
 								maintained={application.own_window ?? false}
-								// The enclosure mutes everything on a box under a
-								// window, so a dot mutes itself only where the
-								// window is its own.
-								dim={(application.own_window ?? false) && !machine.maintained}
+								quiet
 								size={DOT_SIZE}
 							/>
 						</Box>
@@ -152,7 +157,6 @@ function MachineBlock({
 								health={application.health ?? undefined}
 								monitored={application.is_monitored !== false}
 								maintained={application.own_window ?? false}
-								dim={application.maintained ?? false}
 								size={DOT_SIZE}
 							/>
 							<Name

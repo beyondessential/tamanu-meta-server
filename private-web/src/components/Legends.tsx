@@ -1,7 +1,10 @@
 import { Box, Chip, Stack, Typography } from "@mui/material";
 import PersonIcon from "@mui/icons-material/Person";
 import type { HealthState, ShortStatus } from "../types";
-import MachineEnclosure, { ownWindowStripes } from "./MachineEnclosure";
+import MachineEnclosure, {
+	driftWhileHolding,
+	ownWindowStripes,
+} from "./MachineEnclosure";
 import StatusDot from "./StatusDot";
 import VersionSquare from "./VersionSquare";
 
@@ -103,6 +106,17 @@ export function StatusLegend() {
 					Cut through: unmonitored (state shown, nothing alerts)
 				</Typography>
 			</Stack>
+			<Stack
+				data-testid="maintenance-dot-key"
+				direction="row"
+				spacing={0.5}
+				sx={{ alignItems: "center" }}
+			>
+				<StatusDot up="up" health="healthy" maintained quiet />
+				<Typography variant="body2" color="text.secondary">
+					Hollow: this application is under maintenance
+				</Typography>
+			</Stack>
 		</Stack>
 	);
 }
@@ -144,13 +158,21 @@ export function HealthLegend() {
 	);
 }
 
-/// Maintenance is one mark wherever it lands, so it gets one swatch and a
-/// sentence rather than an entry per state and per grain.
+/// The larger grains take stripes, the dot having no room for them and
+/// hollowing instead (see `StatusLegend`). One swatch and a sentence, rather
+/// than an entry per state and per grain.
 /// spec: MNT#presentation
 export function MaintenanceLegend() {
 	return (
-		<Stack direction="row" spacing={0.75} sx={{ alignItems: "flex-start" }}>
+		<Stack
+			data-testid="maintenance-legend"
+			direction="row"
+			spacing={0.75}
+			sx={{ alignItems: "flex-start" }}
+		>
 			<Box
+				data-testid="maintenance-stripes"
+				data-maintenance="holding"
 				sx={{
 					flex: "none",
 					width: "1.25em",
@@ -160,12 +182,12 @@ export function MaintenanceLegend() {
 					border: 1,
 					borderColor: "divider",
 					backgroundImage: (theme) => ownWindowStripes(theme, false),
+					...driftWhileHolding(4, true),
 				}}
 			/>
 			<Typography variant="body2" color="text.secondary">
-				Under maintenance, raising nothing. Lighter once lifted. On an
-				application's dot, a machine's icon, an environment's row, or a
-				group's card.
+				Striped: under maintenance, raising nothing. On a machine's icon, an
+				environment's row, or a group's card. Still and lighter once lifted.
 			</Typography>
 		</Stack>
 	);

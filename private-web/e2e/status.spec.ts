@@ -317,13 +317,24 @@ test.describe("status page", () => {
 		// machine is not being taken down.
 		await expect(pill).not.toHaveAttribute("data-maintenance");
 
-		// The cut is the window's own, which runs the other way from the one
-		// marking a target nobody is watching.
-		const cuts = await dots.evaluateAll((els) =>
-			els.map((el) => getComputedStyle(el).maskImage),
+		// The window hollows the dot, leaving a ring in its health colour, so
+		// the workload reads as out of play with its health still on it.
+		const marks = await dots.evaluateAll((els) =>
+			els.map((el) => {
+				const style = getComputedStyle(el);
+				return { fill: style.backgroundColor, ring: style.borderTopWidth };
+			}),
 		);
-		expect(cuts[0]).toContain("45deg");
-		expect(cuts[1]).not.toContain("45deg");
+		expect(marks[0]!.fill).toBe("rgba(0, 0, 0, 0)");
+		expect(marks[0]!.ring).not.toBe("0px");
+		expect(marks[1]!.fill).not.toBe("rgba(0, 0, 0, 0)");
+		expect(marks[1]!.ring).toBe("0px");
+
+		// The enclosure names what its dots stand for, so hovering opens one
+		// tooltip rather than the dot's and the box's on top of each other.
+		await pill.hover();
+		await expect(page.getByRole("tooltip")).toHaveCount(1);
+		await expect(page.getByRole("tooltip")).toContainText("under maintenance");
 	});
 
 	/// Suspension outlasts the window by the settle period, so a box stays
@@ -396,25 +407,30 @@ test.describe("status page", () => {
 		// The legend names both, and its swatches are the same component, so a
 		// reader can match what they are looking at to a name.
 		await expect(
-			page.getByText(/Under maintenance, raising nothing/),
-		).toBeVisible();
-		await expect(
 			page.getByText(
-				/an application's dot, a machine's icon, an environment's row, or a group's card/,
+				/Striped: under maintenance, raising nothing\. On a machine's icon, an environment's row, or a group's card\./,
 			),
 		).toBeVisible();
-		const swatches = await page
-			.locator("[data-maintenance]")
-			.evaluateAll((els) =>
-				els.map((el) => [
-					el.getAttribute("data-maintenance"),
-					getComputedStyle(el).backgroundImage,
-				]),
-			);
-		const legendHolding = swatches.find(([state]) => state === "holding");
-		const legendSettling = swatches.find(([state]) => state === "settling");
-		expect(legendHolding?.[1]).toBe(holdingMark);
-		expect(legendSettling?.[1]).toBe(settlingMark);
+		// The legend's swatch is the same stripes the card draws, so a reader can
+		// match what they are looking at to the name. Scoped to the legend: the
+		// unscoped lookup found the card's own marks and compared them to
+		// themselves.
+		const legendStripes = await page
+			.getByTestId("maintenance-legend")
+			.getByTestId("maintenance-stripes")
+			.evaluate((el) => getComputedStyle(el).backgroundImage);
+		expect(legendStripes).toBe(holdingMark);
+		// And the dot's form, which sits with the other dot states, stripes
+		// having no room to resolve at that size.
+		const legendDot = await page
+			.getByTestId("maintenance-dot-key")
+			.getByTestId("status-dot")
+			.evaluate((el) => ({
+				fill: getComputedStyle(el).backgroundColor,
+				ring: getComputedStyle(el).borderTopWidth,
+			}));
+		expect(legendDot.fill).toBe("rgba(0, 0, 0, 0)");
+		expect(legendDot.ring).not.toBe("0px");
 	});
 
 	/// A group's window covers every box in it, so every pill on the card is

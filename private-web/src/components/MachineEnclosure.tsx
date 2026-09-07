@@ -1,4 +1,4 @@
-import { Box, Tooltip, type Theme } from "@mui/material";
+import { Box, Tooltip, keyframes, type Theme } from "@mui/material";
 import { alpha } from "@mui/material/styles";
 import type { ReactNode } from "react";
 import type { HealthState, ShortStatus } from "../types";
@@ -31,6 +31,25 @@ const STATES = {
 // fixed grey, so the stripes hold on a dark card, and they carry their own
 // phase so no background offset exposes the gradient's tile as a seam.
 // spec: MNT#presentation
+/// A slow drift for stripes at `pitch`, for a window that still holds. Work
+/// under way moves and a target serving out the settle period is still, so
+/// motion says someone is in there now.
+///
+/// The travel is one whole tile of the surface's own pitch, measured along the
+/// 45 degree gradient, or the loop shows a seam every time it restarts.
+// spec: MNT#presentation
+export function driftWhileHolding(pitch: number, holding: boolean) {
+	if (!holding) return {};
+	const travel = keyframes`
+		from { background-position: 0 0; }
+		to { background-position: ${pitch * Math.SQRT2}px 0; }
+	`;
+	return {
+		animation: `${travel} 3s linear infinite`,
+		"@media (prefers-reduced-motion: reduce)": { animation: "none" },
+	};
+}
+
 export function ownWindowStripes(theme: Theme, settling: boolean): string {
 	// The settle period drops much further than the window itself: nobody is in
 	// there any more, and the mark is only saying watching has yet to resume.
@@ -132,6 +151,7 @@ export default function MachineEnclosure({
 					bgcolor: state.fill,
 					backgroundImage: (theme) =>
 						ownWindow ? ownWindowStripes(theme, settling) : undefined,
+					...driftWhileHolding(4, ownWindow && !settling),
 					// Every suspended box is muted, whether the window is its own
 					// or reaches it through its environment or its group: all of
 					// them are out of play, so a failing one does not read as one

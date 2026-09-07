@@ -17,7 +17,9 @@ import BarChartIcon from "@mui/icons-material/BarChart";
 import PersonIcon from "@mui/icons-material/Person";
 import { useMemo } from "react";
 import { Link as RouterLink } from "react-router-dom";
-import MachineEnclosure from "../components/MachineEnclosure";
+import MachineEnclosure, {
+	driftWhileHolding,
+} from "../components/MachineEnclosure";
 import StatusDot from "../components/StatusDot";
 import VersionIndicator from "../components/VersionIndicator";
 import { useVersionTrackingAcross } from "../hooks/useApplicationTypes";
@@ -326,6 +328,7 @@ function GroupCardLoader({
 									);
 									return `repeating-linear-gradient(45deg, ${ink} 0 1px, transparent 1px 7px, ${ink} 7px 8px)`;
 								},
+								...driftWhileHolding(8, !groupWindowSettling),
 							}
 						: {}),
 					"&:hover": {
@@ -706,6 +709,7 @@ export function RankedDotStrip({
 											);
 											return `repeating-linear-gradient(45deg, ${ink} 0 1px, transparent 1px 5px, ${ink} 5px 6px)`;
 										},
+										...driftWhileHolding(6, !settling),
 									}
 								: {}),
 							// Lighter than the card's own borders, so the rank break
@@ -746,9 +750,18 @@ export function RankedDotStrip({
 								maintained={box.lead.machine_maintained}
 								settling={box.lead.machine_maintenance_settling}
 								ownWindow={box.lead.machine_own_window}
-								describes={box.applications.map(
-									(m) =>
+								describes={box.applications.map((m) =>
+									[
 										`${m.name}${m.rank ? ` · ${m.rank}` : ""} · ${m.type}`,
+										m.own_window
+											? m.maintenance_settling
+												? "maintenance just ended"
+												: "under maintenance"
+											: null,
+										m.is_monitored ? null : "unmonitored",
+									]
+										.filter(Boolean)
+										.join(" · "),
 								)}
 							>
 								{box.applications.map((m) => (
@@ -759,10 +772,7 @@ export function RankedDotStrip({
 											monitored={m.is_monitored}
 											maintained={m.own_window}
 											settling={m.maintenance_settling}
-											// The enclosure mutes everything on a box
-											// under a window, so a dot mutes itself
-											// only where the window is its own.
-											dim={m.maintained && !m.machine_maintained}
+											quiet
 											size={DOT_SIZE}
 										/>
 									</Box>
