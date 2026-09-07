@@ -769,3 +769,61 @@ async fn a_releaser_records_the_digest_it_publishes() {
 	)
 	.await
 }
+
+/// A device is offered the artifacts of the version it reports running, and a
+/// known issue on that version does not withhold them. A known issue says a
+/// version is not one to move to, and the versions carrying one are exactly the
+/// ones a fleet is still sitting on and still needs a schema for. A range is a
+/// question about where to go, so it still resolves past the version.
+// spec: ART#what-a-version-offers
+#[tokio::test(flavor = "multi_thread")]
+async fn a_known_issue_does_not_withhold_a_version_s_own_artifacts() {
+	commons_tests::server::run_with_device_auth(
+		"machine",
+		async |mut conn, cert, device_id, public, _| {
+			seed(&mut conn).await;
+			enrol(&mut conn, device_id, GROUP_A).await;
+
+			// An open known issue has no upper bound, so it covers 2.60.0 and
+			// every later patch of that line.
+			conn.batch_execute(
+				"INSERT INTO version_known_issues
+				 (author, description, min_major, min_minor, min_patch)
+				 VALUES ('admin', 'broken', 2, 60, 0)",
+			)
+			.await
+			.expect("seed a known issue over 2.60.0");
+
+			let offered = public
+				.get("/versions/2.60.0/artifacts")
+				.add_header("x-forwarded-client-cert", &format!("Cert={cert}"))
+				.await;
+			offered.assert_status_ok();
+			let artifacts: Vec<serde_json::Value> = offered.json();
+			assert_eq!(artifacts.len(), 1);
+			assert_eq!(
+				artifacts[0]["id"], THEIRS,
+				"the group's own schema for the version it is on"
+			);
+
+			let bytes = public
+				.get(&format!("/versions/2.60.0/artifacts/{THEIRS}/download"))
+				.add_header("x-forwarded-client-cert", &format!("Cert={cert}"))
+				.await;
+			bytes.assert_status_ok();
+			assert_eq!(bytes.text(), "group a schema");
+
+			// The same known issue still keeps a range off that version.
+			let ranged = public
+				.get("/versions/2.60.x/artifacts")
+				.add_header("x-forwarded-client-cert", &format!("Cert={cert}"))
+				.await;
+			assert_eq!(
+				ranged.status_code(),
+				StatusCode::NOT_FOUND,
+				"a range has nothing ready to land on"
+			);
+		},
+	)
+	.await
+}
