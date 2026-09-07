@@ -202,11 +202,17 @@ test.describe("group inventory", () => {
 
 		// Canopy's address and the environment's identity are filled in; the
 		// playbook is the operator's to pick.
-		await expect(production.getByTestId("run-command")).toContainText(
-			"CANOPY_GROUP=kamaka CANOPY_RANK=production ansible-playbook -i inventory/canopy.yml <playbook>",
-		);
-		await expect(production.getByTestId("run-command")).toContainText(
-			`CANOPY_URL=${new URL(page.url()).origin}`,
+		const line = `CANOPY_URL=${new URL(page.url()).origin} CANOPY_GROUP=kamaka CANOPY_RANK=production ansible-playbook -i inventory/canopy.yml <playbook>`;
+		await expect(production.getByTestId("run-command")).toHaveText(line);
+
+		// Copying it is the point of the panel, so the clipboard carries the
+		// whole line and not the visible fragment of a scrolled block.
+		await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+		await production
+			.getByRole("button", { name: "Copy the command" })
+			.click();
+		expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(
+			line,
 		);
 	});
 
