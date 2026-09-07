@@ -463,38 +463,39 @@ pub async fn get_version_artifacts(
 	let mut conn = state.db_read.get().await?;
 	let version = VersionStr::from_str(&args.version)?;
 	let version_record = Version::get_by_version(&mut conn, version).await?;
-	// The full set, including what specificity passed over and every group's,
-	// because what resolution hides is a fact about how a version was
-	// published and an operator has to be able to see it.
-	// spec: ART#what-a-version-offers
-	let artifacts_with_metadata = Artifact::get_for_version_all_matches_with_metadata(
-		&mut conn,
-		version_record.id,
-		Scope::Fleet,
-	)
-	.await?;
-	let group_names = ServerGroup::names_by_id(&mut conn).await?;
-	Ok(Json(
-		artifacts_with_metadata
-			.into_iter()
-			.map(
-				|(a, is_exact, has_range_override, is_used_in_public_api)| ArtifactData {
-					id: a.id,
-					artifact_type: a.artifact_type,
-					platform: a.platform,
-					canopy_holds_bytes: a.download_url.is_none(),
-					download_url: a.download_url,
-					group_name: a.group_id.and_then(|g| group_names.get(&g).cloned()),
-					group_id: a.group_id,
-					digest: a.digest,
-					is_exact,
-					version_range_pattern: a.version_range_pattern,
-					has_range_override,
-					is_used_in_public_api,
-				},
-			)
-			.collect(),
-	))
+	Ok(Json(artifacts_of(&mut conn, version_record.id).await?))
+}
+
+/// Every artifact of a version as an operator sees it: the full set, including
+/// what specificity passed over and every group's, because what resolution
+/// hides is a fact about how a version was published.
+// spec: ART#what-a-version-offers
+async fn artifacts_of(
+	conn: &mut database::diesel_async::AsyncPgConnection,
+	version_id: Uuid,
+) -> Result<Vec<ArtifactData>> {
+	let artifacts_with_metadata =
+		Artifact::get_for_version_all_matches_with_metadata(conn, version_id, Scope::Fleet).await?;
+	let group_names = ServerGroup::names_by_id(conn).await?;
+	Ok(artifacts_with_metadata
+		.into_iter()
+		.map(
+			|(a, is_exact, has_range_override, is_used_in_public_api)| ArtifactData {
+				id: a.id,
+				artifact_type: a.artifact_type,
+				platform: a.platform,
+				canopy_holds_bytes: a.download_url.is_none(),
+				download_url: a.download_url,
+				group_name: a.group_id.and_then(|g| group_names.get(&g).cloned()),
+				group_id: a.group_id,
+				digest: a.digest,
+				is_exact,
+				version_range_pattern: a.version_range_pattern,
+				has_range_override,
+				is_used_in_public_api,
+			},
+		)
+		.collect())
 }
 
 /// Identifies a version and the publication status to set on it.
@@ -645,6 +646,11 @@ pub struct CreateArtifactArgs {
 	pub content_base64: Option<String>,
 	/// Media type of those bytes.
 	pub content_type: Option<String>,
+	/// Algorithm-prefixed digest of those bytes, e.g. `sha256:2cf24dba…`.
+	/// Required when a group is named: Canopy checks the bytes against it as
+	/// they arrive and refuses the registration on a mismatch, so a corrupted
+	/// upload is refused while whoever sent it is still there to send it again.
+	pub digest: Option<String>,
 }
 
 /// Create a new artifact tied to an exact version.
@@ -682,7 +688,23 @@ pub async fn create_artifact(
 					MAX_HELD_ARTIFACT_BYTES / (1024 * 1024)
 				)));
 			}
+			let Some(claimed) = args
+				.digest
+				.as_deref()
+				.map(str::trim)
+				.filter(|d| !d.is_empty())
+			else {
+				return Err(AppError::BadRequest(
+					"a group-scoped artifact must carry the digest of its bytes".into(),
+				));
+			};
+			// spec: ART#digests
 			let digest = digest_of(&bytes);
+			if claimed != digest {
+				return Err(AppError::BadRequest(format!(
+					"the bytes are {digest}, not the {claimed} the registration names"
+				)));
+			}
 			(Some(bytes), Some(digest))
 		}
 		(Some(_), None) => {
@@ -735,21 +757,15 @@ pub async fn create_artifact(
 	)
 	.await?;
 
-	let group_names = ServerGroup::names_by_id(&mut conn).await?;
-	Ok(Json(ArtifactData {
-		id: artifact.id,
-		artifact_type: artifact.artifact_type,
-		platform: artifact.platform,
-		canopy_holds_bytes: artifact.download_url.is_none(),
-		download_url: artifact.download_url,
-		group_name: artifact.group_id.and_then(|g| group_names.get(&g).cloned()),
-		group_id: artifact.group_id,
-		digest: artifact.digest,
-		is_exact: true,
-		version_range_pattern: None,
-		has_range_override: false,
-		is_used_in_public_api: true,
-	}))
+	// Read back through the listing rather than describing the row a second
+	// time here: whether it overrides a range and whether it is the one served
+	// follow from the version's other artifacts, not from this registration.
+	artifacts_of(&mut conn, args.version_id)
+		.await?
+		.into_iter()
+		.find(|a| a.id == artifact.id)
+		.map(Json)
+		.ok_or_else(|| AppError::custom("the artifact just registered is not listed"))
 }
 
 /// Identifies a single artifact by id.

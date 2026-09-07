@@ -10008,6 +10008,13 @@
             ],
             "description": "Media type of those bytes."
           },
+          "digest": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Algorithm-prefixed digest of those bytes, e.g. `sha256:2cf24dba…`.\nRequired when a group is named: Canopy checks the bytes against it as\nthey arrive and refuses the registration on a mismatch, so a corrupted\nupload is refused while whoever sent it is still there to send it again."
+          },
           "download_url": {
             "type": [
               "string",

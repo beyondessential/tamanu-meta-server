@@ -94,6 +94,7 @@ async fn a_registration_that_rests_nowhere_is_refused() {
 			serde_json::json!({
 				"version_id": version, "artifact_type": "installer", "platform": "any",
 				"group_id": group, "content_base64": "aGVsbG8=",
+				"digest": database::artifacts::digest_of(b"hello"),
 				"download_url": "https://example.com/x.exe",
 			}),
 			// A group with no bytes to hold.
@@ -110,6 +111,18 @@ async fn a_registration_that_rests_nowhere_is_refused() {
 			serde_json::json!({
 				"version_id": version, "artifact_type": "installer", "platform": "any",
 				"group_id": group, "content_base64": "not base64 at all!!",
+				"digest": database::artifacts::digest_of(b"hello"),
+			}),
+			// Bytes that are not the digest the registration names.
+			serde_json::json!({
+				"version_id": version, "artifact_type": "installer", "platform": "any",
+				"group_id": group, "content_base64": "aGVsbG8=",
+				"digest": database::artifacts::digest_of(b"something else"),
+			}),
+			// Bytes with no digest to check them against.
+			serde_json::json!({
+				"version_id": version, "artifact_type": "installer", "platform": "any",
+				"group_id": group, "content_base64": "aGVsbG8=",
 			}),
 		];
 
@@ -202,6 +215,7 @@ async fn an_operator_registers_a_group_scoped_artifact() {
 				"group_id": group,
 				"content_base64": "a2FtYWthIHNjaGVtYQ==",
 				"content_type": "application/sql",
+				"digest": database::artifacts::digest_of(b"kamaka schema"),
 			}))
 			.await;
 		response.assert_status_ok();
@@ -291,7 +305,8 @@ async fn an_upload_over_the_limit_is_told_what_it_is() {
 		.unwrap();
 
 		// "AAAA" decodes to three zero bytes, so the repeat count sets the size.
-		let four_mib = "A".repeat(4 * (4 * 1024 * 1024 / 3));
+		let four_mib_bytes = 3 * (4 * 1024 * 1024 / 3);
+		let four_mib = "A".repeat(4 * (four_mib_bytes / 3));
 		let accepted = private
 			.post("/api/versions/create_artifact")
 			.json(&serde_json::json!({
@@ -300,6 +315,7 @@ async fn an_upload_over_the_limit_is_told_what_it_is() {
 				"platform": "any",
 				"group_id": group,
 				"content_base64": four_mib,
+				"digest": database::artifacts::digest_of(&vec![0u8; four_mib_bytes]),
 			}))
 			.await;
 		accepted.assert_status_ok();
@@ -391,6 +407,74 @@ async fn the_listing_says_which_artifacts_are_offered() {
 		assert!(
 			!offered(range_installer),
 			"the range it displaces is served to nobody"
+		);
+	})
+	.await
+}
+
+/// What an exact artifact overrides follows the resolution rules rather than a
+/// group match: it displaces a range its own scope can see, so a group's exact
+/// artifact overrides an unscoped range, and an unscoped exact overrides
+/// nothing in a group whose own range outranks it. The registration answers
+/// with what the listing would say rather than describing the row a second
+/// time.
+// spec: ART#what-a-version-offers
+#[tokio::test(flavor = "multi_thread")]
+async fn a_registration_answers_what_it_overrides() {
+	commons_tests::server::run(async |mut conn, _public, private| {
+		let version = "22222222-1111-0000-0000-222222222222";
+		let ours = "22222222-2222-0000-0000-222222222222";
+		let theirs = "22222222-3333-0000-0000-222222222222";
+
+		conn.batch_execute(&format!(
+			"INSERT INTO versions (id, major, minor, patch, changelog, status)
+			 VALUES ('{version}', 2, 60, 0, '', 'published');
+			 INSERT INTO server_groups (id, name) VALUES
+			 ('{ours}', 'kamaka'), ('{theirs}', 'drifting');
+
+			 INSERT INTO artifacts (version_id, platform, artifact_type, version_range_pattern, download_url)
+			 VALUES (NULL, 'any', 'reporting-schema', '2.60.x', 'https://example.com/range.sql');
+
+			 INSERT INTO artifacts (version_id, platform, artifact_type, version_range_pattern, group_id, content, content_type, digest)
+			 VALUES (NULL, 'windows', 'installer', '2.60.x', '{theirs}', 'theirs', 'application/octet-stream', 'sha256:x')",
+		))
+		.await
+		.unwrap();
+
+		let held = private
+			.post("/api/versions/create_artifact")
+			.json(&serde_json::json!({
+				"version_id": version,
+				"artifact_type": "reporting-schema",
+				"platform": "any",
+				"group_id": ours,
+				"content_base64": "a2FtYWthIHNjaGVtYQ==",
+				"digest": database::artifacts::digest_of(b"kamaka schema"),
+			}))
+			.await;
+		held.assert_status_ok();
+		let held: serde_json::Value = held.json();
+		assert_eq!(held["is_exact"], true);
+		assert_eq!(
+			held["has_range_override"], true,
+			"the group's own displaces the unscoped range for that group"
+		);
+		assert_eq!(held["is_used_in_public_api"], true);
+
+		let unscoped = private
+			.post("/api/versions/create_artifact")
+			.json(&serde_json::json!({
+				"version_id": version,
+				"artifact_type": "installer",
+				"platform": "windows",
+				"download_url": "https://example.com/x.exe",
+			}))
+			.await;
+		unscoped.assert_status_ok();
+		let unscoped: serde_json::Value = unscoped.json();
+		assert_eq!(
+			unscoped["has_range_override"], false,
+			"a group's range outranks an unscoped exact, so nothing is displaced"
 		);
 	})
 	.await
