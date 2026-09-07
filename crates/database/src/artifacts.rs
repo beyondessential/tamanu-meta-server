@@ -340,6 +340,10 @@ impl Artifact {
 			.first(db)
 			.await
 			.map_err(AppError::from)?;
+		// A blank URL is no location at all. The constraint only tests for NULL,
+		// so an empty string would pass it and leave an artifact nothing can be
+		// fetched from.
+		let new_url = new_url.filter(|url| !url.trim().is_empty());
 		match (scoped.is_some(), new_url.is_some()) {
 			(true, true) => {
 				return Err(AppError::Conflict(

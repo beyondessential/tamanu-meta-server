@@ -293,4 +293,66 @@ test.describe("group-scoped artifacts", () => {
 		);
 		expect(Number(left.n)).toBe(1);
 	});
+
+	/// An unscoped artifact rests at a location, so editing its type or platform
+	/// must not be a way to take that location away. The field's `required` never
+	/// fires: the row is not a form and Save is not a submit.
+	///
+	/// spec: ART#where-an-artifact-rests
+	test("an unscoped artifact cannot be saved without a location", async ({
+		page,
+		sql,
+	}) => {
+		const version = await seedVersion(sql, {
+			major: 2,
+			minor: 60,
+			patch: 0,
+			status: "published",
+		});
+		await seedArtifact(sql, {
+			versionId: version.id,
+			artifactType: "installer",
+			platform: "windows",
+			downloadUrl: "https://example.com/i.exe",
+		});
+
+		await page.goto(`/versions/2.60.0`);
+		await page.getByRole("button", { name: "Unlock" }).click();
+		await page
+			.getByRole("button", { name: "edit installer windows for every group" })
+			.click();
+
+		await page.getByRole("textbox").last().fill("");
+		await expect(page.getByRole("button", { name: "Save" })).toBeDisabled();
+
+		// And the location it had is still the location it has.
+		const [row] = await sql.query<{ download_url: string | null }>(
+			"SELECT download_url FROM artifacts",
+		);
+		expect(row.download_url).toBe("https://example.com/i.exe");
+	});
+
+	/// A group list that failed to load offers only "Every group", which reads as
+	/// a fleet with no groups. Publishing into a group becomes impossible, so the
+	/// operator has to be told rather than left to infer it.
+	///
+	/// spec: ART#registration
+	test("a group list that fails to load says so", async ({ page, sql }) => {
+		await seedVersion(sql, {
+			major: 2,
+			minor: 60,
+			patch: 0,
+			status: "published",
+		});
+		await seedServerGroup(sql, { name: "kamaka" });
+
+		await page.route("**/api/fleet/groups/list", (route) => route.abort());
+
+		await page.goto(`/versions/2.60.0`);
+		await page.getByRole("button", { name: "Unlock" }).click();
+		await page.getByRole("button", { name: "Create" }).click();
+
+		await expect(page.getByText("Could not load groups")).toBeVisible();
+		await expect(page.getByRole("combobox", { name: "Group" })).toBeDisabled();
+	});
 });

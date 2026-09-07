@@ -682,17 +682,20 @@ pub async fn create_artifact(
 		(None, None) => (None, None),
 	};
 
+	// A blank URL is no location at all, and the constraint only tests for NULL.
+	let download_url = args.download_url.filter(|url| !url.trim().is_empty());
+
 	// An artifact rests in one place or the other, so a registration naming a
 	// group and a location together is refused rather than written and caught
 	// by the constraint.
 	// spec: ART#where-an-artifact-rests
-	if args.group_id.is_some() && args.download_url.is_some() {
+	if args.group_id.is_some() && download_url.is_some() {
 		return Err(AppError::BadRequest(
 			"an artifact Canopy holds has no download URL".into(),
 		));
 	}
 
-	if args.group_id.is_none() && args.download_url.is_none() {
+	if args.group_id.is_none() && download_url.is_none() {
 		return Err(AppError::BadRequest(
 			"an artifact needs a download URL or a group".into(),
 		));
@@ -704,7 +707,7 @@ pub async fn create_artifact(
 			version_id: Some(args.version_id),
 			artifact_type: args.artifact_type,
 			platform: args.platform,
-			download_url: args.download_url,
+			download_url,
 			device_id: None,
 			version_range_pattern: None,
 			group_id: args.group_id,

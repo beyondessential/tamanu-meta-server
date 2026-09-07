@@ -626,7 +626,12 @@ function EditArtifactRow({
 						size="small"
 						variant="contained"
 						onClick={save}
-						disabled={action.pending}
+						// `required` on the field never fires: the row is not a
+						// form and Save is not a submit, so nothing validates it.
+						disabled={
+							action.pending ||
+							(!artifact.canopy_holds_bytes && !url?.trim())
+						}
 					>
 						{action.pending ? "Saving…" : "Save"}
 					</Button>
@@ -723,7 +728,14 @@ function CreateArtifactForm({
 						label="Group"
 						value={groupId}
 						onChange={(e) => setGroupId(e.target.value)}
-						disabled={action.pending}
+						disabled={action.pending || groups.status === "error"}
+						// Falling back to an empty list silently offers only
+						// "Every group", which reads as a fleet with no groups
+						// rather than as a list that failed to load.
+						error={groups.status === "error"}
+						helperText={
+							groups.status === "error" ? "Could not load groups" : undefined
+						}
 						sx={{ minWidth: 160 }}
 					>
 						<MenuItem value="">Every group</MenuItem>

@@ -218,3 +218,55 @@ async fn an_operator_registers_a_group_scoped_artifact() {
 	})
 	.await
 }
+
+/// A blank location is no location. The check constraint only tests for NULL,
+/// so an empty string would pass it and leave an artifact nothing can be
+/// fetched from.
+// spec: ART#where-an-artifact-rests
+#[tokio::test(flavor = "multi_thread")]
+async fn a_blank_download_url_is_not_a_location() {
+	commons_tests::server::run(async |mut conn, _public, private| {
+		let version = "dddddddd-0000-0000-0000-dddddddddddd";
+		let artifact = "eeeeeeee-0000-0000-0000-eeeeeeeeeeee";
+
+		conn.batch_execute(&format!(
+			"INSERT INTO versions (id, major, minor, patch, changelog, status)
+			 VALUES ('{version}', 2, 60, 0, '', 'published');
+			 INSERT INTO artifacts (id, version_id, platform, artifact_type, download_url)
+			 VALUES ('{artifact}', '{version}', 'any', 'installer', 'https://example.com/x.exe')",
+		))
+		.await
+		.unwrap();
+
+		let created = private
+			.post("/api/versions/create_artifact")
+			.json(&serde_json::json!({
+				"version_id": version,
+				"artifact_type": "installer",
+				"platform": "linux",
+				"download_url": "   ",
+			}))
+			.await;
+		assert_eq!(created.status_code(), axum::http::StatusCode::BAD_REQUEST);
+
+		let updated = private
+			.post("/api/versions/update_artifact")
+			.json(&serde_json::json!({
+				"artifact_id": artifact,
+				"artifact_type": "installer",
+				"platform": "any",
+				"download_url": "",
+			}))
+			.await;
+		assert_eq!(updated.status_code(), axum::http::StatusCode::CONFLICT);
+
+		let listed = private
+			.post("/api/versions/get_version_artifacts")
+			.json(&serde_json::json!({ "version": "2.60.0" }))
+			.await;
+		let artifacts: Vec<serde_json::Value> = listed.json();
+		assert_eq!(artifacts.len(), 1, "nothing blank was written");
+		assert_eq!(artifacts[0]["download_url"], "https://example.com/x.exe");
+	})
+	.await
+}
