@@ -3,6 +3,7 @@ import {
 	resetSeededTables,
 	seedApplicationReport,
 	seedDevice,
+	seedReportingSchemaBuild,
 	seedRestoreConsumerCapability,
 	seedRestoreReplica,
 	seedServer,
@@ -16,7 +17,7 @@ import { expect, test } from "./test-fixtures";
 /// owes a schema only where something is there to build one.
 ///
 /// spec: RPT#pairs
-async function declareBuilder(sql: Sql, groupId: string): Promise<void> {
+async function declareBuilder(sql: Sql, groupId: string): Promise<string> {
 	const consumer = await seedDevice(sql, { role: "backup-restore" });
 	await seedRestoreConsumerCapability(sql, {
 		deviceId: consumer.id,
@@ -33,6 +34,7 @@ async function declareBuilder(sql: Sql, groupId: string): Promise<void> {
 		intent: "reporting-schema",
 		name: "kamaka-schemas",
 	});
+	return consumer.id;
 }
 
 /// How a group's reporting-schema pairs are presented, and how an operator asks
@@ -146,5 +148,86 @@ test.describe("reporting schemas", () => {
 		await expect(section).toBeVisible();
 		await expect(section.getByTestId("reporting-schema-row")).toHaveCount(0);
 		await expect(section.getByText(/no builder is declared/i)).toBeVisible();
+	});
+
+	/// A built pair and a failed one read differently on the screen, and the
+	/// failed one carries the builder's own description, which is the only
+	/// place an operator can read why it failed.
+	///
+	/// spec: RPT#presentation
+	test("a built pair and a failed one read differently", async ({
+		page,
+		sql,
+	}) => {
+		const built = await seedVersion(sql, {
+			major: 2,
+			minor: 59,
+			patch: 0,
+			status: "published",
+		});
+		const failed = await seedVersion(sql, {
+			major: 2,
+			minor: 60,
+			patch: 0,
+			status: "published",
+		});
+		const group = await seedServerGroup(sql, { name: "kamaka" });
+		const consumer = await declareBuilder(sql, group.id);
+
+		const central = await seedServer(sql, {
+			name: "central",
+			groupId: group.id,
+			type: "tamanu-central",
+		});
+		const facility = await seedServer(sql, {
+			name: "facility",
+			groupId: group.id,
+			type: "tamanu-facility",
+		});
+		await seedApplicationReport(sql, {
+			applicationId: central.id,
+			version: "2.60.0",
+		});
+		await seedApplicationReport(sql, {
+			applicationId: facility.id,
+			version: "2.59.0",
+		});
+
+		await seedReportingSchemaBuild(sql, {
+			consumerDeviceId: consumer,
+			groupId: group.id,
+			machineId: central.machineId,
+			applicationId: central.id,
+			versionId: built.id,
+			built: true,
+		});
+		await seedReportingSchemaBuild(sql, {
+			consumerDeviceId: consumer,
+			groupId: group.id,
+			machineId: central.machineId,
+			applicationId: central.id,
+			versionId: failed.id,
+			built: false,
+			error: "views did not compile",
+		});
+
+		await page.goto(`/groups/${group.id}`);
+
+		const section = page.getByTestId("reporting-schemas");
+		await expect(section.getByText("Built", { exact: true })).toBeVisible();
+		await expect(section.getByText("Failed", { exact: true })).toBeVisible();
+		await expect(
+			section.getByText("Awaiting build", { exact: true }),
+		).toHaveCount(0);
+
+		// The description is only reachable by hovering the chip, which is the
+		// whole of an operator's access to why the build failed.
+		await section.getByText("Failed", { exact: true }).hover();
+		await expect(page.getByText("views did not compile")).toBeVisible();
+
+		// A settled pair offers a rebuild rather than a first build.
+		await expect(
+			section.getByRole("button", { name: "Build again" }),
+		).toHaveCount(2);
 	});
 });

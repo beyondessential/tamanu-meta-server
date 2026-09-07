@@ -1638,6 +1638,54 @@ export async function seedMigrationTest(
 	}
 }
 
+/** Seed a reporting-schema build: the restore-health report that carries the
+ * common fields, plus the build outcome hung off it. `built: false` with an
+ * `error` is what makes the pair read as failed; a build settles the pair
+ * either way. */
+export async function seedReportingSchemaBuild(
+	sql: Sql,
+	opts: {
+		consumerDeviceId: string;
+		groupId: string;
+		/** The machine whose snapshot the schema was built from. */
+		machineId: string;
+		/** The group's central, which the build is held against. */
+		applicationId?: string | null;
+		versionId: string;
+		snapshotId?: string;
+		built?: boolean;
+		error?: string | null;
+		/** Artifact ids the build registered, of which the schema is one. */
+		artifactIds?: string[];
+	},
+): Promise<void> {
+	const built = opts.built ?? true;
+	const rows = await sql.query<{ id: string }>(
+		`INSERT INTO backup_restore_checks
+		 (consumer_device_id, group_id, machine_id, type, intent, snapshot_id, outcome,
+		  replica_healthy, observed_at)
+		 VALUES ($1, $2, $3, 'tamanu-postgres', 'reporting-schema', $4, 'success', true, NOW())
+		 RETURNING id`,
+		[opts.consumerDeviceId, opts.groupId, opts.machineId, opts.snapshotId ?? "snap-1"],
+	);
+	const checkId = rows[0]!.id;
+
+	await sql.query(
+		`INSERT INTO reporting_schema_builds
+		 (check_id, group_id, version_id, application_id, built, error, artifact_ids)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7::uuid[])`,
+		[
+			checkId,
+			opts.groupId,
+			opts.versionId,
+			opts.applicationId ?? null,
+			built,
+			built ? null : (opts.error ?? "the build failed"),
+			opts.artifactIds ?? [],
+		],
+	);
+}
+
 /** Record where a group is going. `plannedFor` is `YYYY-MM-DD`; omit for a plan
  * with no date. */
 export interface SeededMaintenanceWindow {
