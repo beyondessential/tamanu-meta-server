@@ -188,6 +188,44 @@ async fn a_builder_publishes_only_for_its_own_group() {
 	.await
 }
 
+/// A schema is registered against one exact version. Canopy resolves a range
+/// artifact for every version it covers, so a range registration would hand a
+/// server a schema built for a version it does not run.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_schema_registered_against_a_range_is_refused() {
+	commons_tests::server::run_with_device_auth(
+		"backup-restore",
+		async |mut conn, cert, device_id, public, _| {
+			seed(&mut conn, device_id).await;
+
+			let ranged = public
+				.post(&format!(
+					"/artifacts/2.60.x/reporting-schema/any?group={GROUP}"
+				))
+				.add_header("x-forwarded-client-cert", &format!("Cert={cert}"))
+				.add_header("content-type", "application/sql")
+				.text("CREATE VIEW ...")
+				.await;
+			assert_eq!(ranged.status_code(), StatusCode::BAD_REQUEST);
+
+			let other_type = public
+				.post(&format!(
+					"/artifacts/2.60.x/installer/windows?group={GROUP}"
+				))
+				.add_header("x-forwarded-client-cert", &format!("Cert={cert}"))
+				.text("installer bytes")
+				.await;
+			other_type.assert_status_ok();
+			let registered: serde_json::Value = other_type.json();
+			assert_eq!(
+				registered["version_range_pattern"], "2.60.x",
+				"a range is still how any other artifact type covers a minor"
+			);
+		},
+	)
+	.await
+}
+
 /// A declaration an operator has turned off does not authorise anything. It is
 /// the enabled declaration that covers a group, so a builder whose declaration
 /// is disabled is refused its own group's artifacts.

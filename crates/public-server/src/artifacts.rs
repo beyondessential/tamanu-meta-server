@@ -232,6 +232,15 @@ async fn create(
 
 		(Some(version_id), None)
 	} else {
+		// A schema follows the migrations one exact version applies, and Canopy
+		// resolves a range artifact for every version it covers.
+		// spec: RPT#the-build-contract
+		if artifact_type == REPORTING_SCHEMA_TYPE {
+			return Err(AppError::BadRequest(
+				"a reporting schema is registered against an exact version, not a range".into(),
+			));
+		}
+
 		Range::parse(&version).map_err(|_| AppError::custom("Invalid version or version range"))?;
 
 		(None, Some(version.clone()))
@@ -284,3 +293,6 @@ struct RegisterScope {
 /// Cap on the bytes Canopy will hold for one artifact, matching the operator
 /// path. A reporting schema is a SQL file; anything approaching this is not one.
 const MAX_HELD_ARTIFACT_BYTES: usize = 32 * 1024 * 1024;
+
+/// The artifact type a reporting-schema build publishes.
+const REPORTING_SCHEMA_TYPE: &str = "reporting-schema";
