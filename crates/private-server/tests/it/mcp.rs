@@ -1460,3 +1460,68 @@ async fn mcp_health_matches_what_the_ui_presents() {
 	})
 	.await
 }
+
+const ENV_GROUP: &str = "aaaaaaaa-0000-0000-0000-0000000000e0";
+const ENV_TEST_APP: &str = "aaaaaaaa-0000-0000-0000-0000000000e1";
+const ENV_TEST_INC: &str = "aaaaaaaa-0000-0000-0000-0000000000e2";
+const ENV_GROUP_INC: &str = "aaaaaaaa-0000-0000-0000-0000000000e3";
+
+/// An incident targets one of a group's environments, and both tools report
+/// which. An agent summarising the fleet reads these, and a site's test box
+/// counted as the site's production trouble is a wrong answer with no way for
+/// the reader to tell.
+///
+/// spec: INC#targets
+#[tokio::test(flavor = "multi_thread")]
+async fn incidents_name_the_environment_they_target() {
+	commons_tests::server::run(async |mut conn, _public, private| {
+		conn.batch_execute(&format!(
+			"INSERT INTO server_groups (id, name) VALUES ('{ENV_GROUP}', 'kamaka'); \
+			 WITH m AS (INSERT INTO machines (id, group_id) VALUES ('{ENV_TEST_APP}', '{ENV_GROUP}') RETURNING id) \
+			 INSERT INTO applications (id, host, name, type, rank, group_id, is_monitored, machine_id) VALUES \
+				('{ENV_TEST_APP}', 'https://test.kamaka', 'kamaka test', 'tamanu-central', 'test', '{ENV_GROUP}', true, '{ENV_TEST_APP}'); \
+			 INSERT INTO incidents (id, created_at, updated_at, server_group_id, rank, opened_at) VALUES \
+				('{ENV_TEST_INC}', NOW(), NOW(), '{ENV_GROUP}', 'test', NOW() - interval '1 hour'), \
+				('{ENV_GROUP_INC}', NOW(), NOW(), '{ENV_GROUP}', NULL, NOW() - interval '1 hour');"
+		))
+		.await
+		.expect("seed an environment incident beside a group one");
+
+		let found = call_tool!(private, "find_incidents", serde_json::json!({}));
+		let by_id = |id: &str| {
+			found["incidents"]
+				.as_array()
+				.unwrap()
+				.iter()
+				.find(|i| i["id"] == id)
+				.unwrap_or_else(|| panic!("{id} missing from find_incidents"))
+				.clone()
+		};
+		assert_eq!(
+			by_id(ENV_TEST_INC)["rank"], "test",
+			"the environment's incident says which environment"
+		);
+		assert!(
+			by_id(ENV_GROUP_INC)["rank"].is_null(),
+			"and the group's own carries no rank, which is how a reader tells them apart"
+		);
+		assert_eq!(by_id(ENV_TEST_INC)["group_name"], "kamaka");
+
+		let detail = call_tool!(
+			private,
+			"get_incident",
+			serde_json::json!({ "incident_id": ENV_TEST_INC })
+		);
+		assert_eq!(
+			detail["rank"], "test",
+			"the detail carries it too, since an agent may fetch one without listing"
+		);
+		let group_detail = call_tool!(
+			private,
+			"get_incident",
+			serde_json::json!({ "incident_id": ENV_GROUP_INC })
+		);
+		assert!(group_detail["rank"].is_null());
+	})
+	.await
+}

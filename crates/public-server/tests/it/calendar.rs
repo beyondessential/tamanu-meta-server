@@ -244,3 +244,90 @@ async fn a_url_with_the_wrong_secret_has_nothing_at_it() {
 	})
 	.await
 }
+
+const CLONE_BOX: &str = "33333333-3333-3333-3333-333333333333";
+
+/// A clone's entry names the environment and carries the clone's own running
+/// version. The team reads this feed to know what is being upgraded when, and an
+/// entry that reads as the site would put a clone's window in the diary as
+/// production's.
+// spec: UPG#the-calendar-feed
+#[tokio::test(flavor = "multi_thread")]
+async fn a_clones_entry_names_the_environment_and_its_own_version() {
+	commons_tests::server::run(async |mut conn, public, _private| {
+		let (group, target) = seed(&mut conn).await;
+		conn.batch_execute(&format!(
+			"INSERT INTO machines (id, group_id) VALUES ('{CLONE_BOX}', '{GROUP}'); \
+			 INSERT INTO applications (id, host, type, rank, group_id, machine_id) VALUES \
+				('{CLONE_BOX}', 'https://clone.kamaka.example', 'tamanu-central', 'clone', '{GROUP}', '{CLONE_BOX}');"
+		))
+		.await
+		.expect("add a clone");
+		// The clone is a minor ahead of production, so an entry carrying 2.60.0
+		// would be reading the group's headline rather than the environment's.
+		let clone_running: VersionStr = "2.60.5".parse().expect("parse");
+		ReportedDetail::record(
+			&mut conn,
+			Some(CLONE_BOX.parse().expect("uuid")),
+			CLONE_BOX.parse().expect("uuid"),
+			"test",
+			&serde_json::json!({}),
+			Some(&clone_running),
+		)
+		.await
+		.expect("report");
+
+		UpgradePlan::record(
+			&mut conn,
+			group,
+			ServerRank::Clone,
+			target.id,
+			PlannedWhen {
+				date: Some(date(2026, 8, 14)),
+				..Default::default()
+			},
+			None,
+			"someone@example.com",
+		)
+		.await
+		.expect("record the clone's plan");
+		UpgradePlan::record(
+			&mut conn,
+			group,
+			ServerRank::Production,
+			target.id,
+			PlannedWhen {
+				date: Some(date(2026, 8, 21)),
+				..Default::default()
+			},
+			None,
+			"someone@example.com",
+		)
+		.await
+		.expect("record production's plan");
+
+		let body = unfold(
+			&public
+				.get(&format!("/calendar/{SECRET}/upgrades.ics"))
+				.await
+				.text(),
+		);
+		assert!(
+			body.contains("SUMMARY:kamaka clone upgrade to 2.61.0"),
+			"the clone's entry names the environment: {body}"
+		);
+		assert!(
+			body.contains("SUMMARY:kamaka upgrade to 2.61.0"),
+			"and production's reads as the site alone: {body}"
+		);
+		assert!(
+			body.contains("DESCRIPTION:Now on 2.60.5"),
+			"the clone's entry carries the clone's own version: {body}"
+		);
+		assert!(
+			body.contains("DESCRIPTION:Now on 2.60.0"),
+			"and production's carries production's: {body}"
+		);
+	})
+	.await
+}

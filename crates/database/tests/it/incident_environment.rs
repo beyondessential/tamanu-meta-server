@@ -465,3 +465,98 @@ async fn a_notice_names_the_environment_it_is_about() {
 	})
 	.await
 }
+
+#[derive(QueryableByName)]
+struct Delay {
+	#[diesel(sql_type = sql_types::Double)]
+	delay_secs: f64,
+}
+
+/// The close notice names the environment too. Only the open was covered, and a
+/// resolve naming the bare site would tell the channel a site's production
+/// recovered when it was the test box.
+// spec: INC#notification
+#[tokio::test(flavor = "multi_thread")]
+async fn a_resolve_names_the_environment_it_is_about() {
+	commons_tests::db::TestDb::run(async |mut conn, _| {
+		let group = insert_group(&mut conn).await;
+		let test =
+			insert_ranked_member(&mut conn, group, Some("test"), "http://test.invalid/").await;
+
+		fail_application(&mut conn, test, "app_down").await;
+		// A resolve is withheld unless an open was actually delivered, since a
+		// flap the channel never saw needs no all-clear.
+		sql_query("UPDATE slack_outbox SET delivered_at = NOW() WHERE kind = $1")
+			.bind::<sql_types::Text, _>(KIND_INCIDENT_OPEN)
+			.execute(&mut conn)
+			.await
+			.expect("mark the open delivered");
+
+		let incident: RowId =
+			sql_query("SELECT id FROM incidents WHERE server_group_id = $1 AND closed_at IS NULL")
+				.bind::<sql_types::Uuid, _>(group)
+				.get_result(&mut conn)
+				.await
+				.expect("the open incident");
+		database::issues::Incident::resolve(
+			&mut conn,
+			incident.id,
+			"op",
+			commons_types::issue::ResolvedReason::Fixed,
+		)
+		.await
+		.expect("resolve");
+
+		let rows: Vec<Payload> =
+			sql_query("SELECT payload FROM slack_outbox WHERE kind = 'incident_resolve'")
+				.load(&mut conn)
+				.await
+				.expect("outbox rows");
+		assert_eq!(rows.len(), 1, "the close notifies once");
+		assert_eq!(
+			rows[0].payload["server"].as_str(),
+			Some("site test"),
+			"the all-clear is for the test environment, not for the site",
+		);
+	})
+	.await
+}
+
+/// Canopy attaches no configuration to an environment, so its grace period is
+/// its group's: an operator who widened a site's cooldown widened it for the
+/// site's test box too, and a test incident does not page ahead of the group's
+/// own delay.
+// spec: INC#targets
+#[tokio::test(flavor = "multi_thread")]
+async fn an_environment_incident_waits_out_its_groups_grace() {
+	commons_tests::db::TestDb::run(async |mut conn, _| {
+		let group = insert_group(&mut conn).await;
+		sql_query(
+			"UPDATE server_groups SET slack_open_delay = INTERVAL '45 minutes' WHERE id = $1",
+		)
+		.bind::<sql_types::Uuid, _>(group)
+		.execute(&mut conn)
+		.await
+		.expect("widen the group's grace");
+		let test =
+			insert_ranked_member(&mut conn, group, Some("test"), "http://test.invalid/").await;
+
+		fail_application(&mut conn, test, "app_down").await;
+
+		let row: Delay = sql_query(
+			"SELECT EXTRACT(EPOCH FROM (o.deliver_after - NOW()))::float8 AS delay_secs \
+			 FROM slack_outbox o JOIN incidents i ON i.id = o.incident_id \
+			 WHERE o.kind = $1 AND i.rank = 'test'",
+		)
+		.bind::<sql_types::Text, _>(KIND_INCIDENT_OPEN)
+		.get_result(&mut conn)
+		.await
+		.expect("the queued open");
+		assert!(
+			row.delay_secs > 40.0 * 60.0,
+			"the environment's notice sits in the group's 45 minute window, not the default; got {}s",
+			row.delay_secs,
+		);
+	})
+	.await
+}

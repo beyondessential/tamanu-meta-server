@@ -739,3 +739,118 @@ async fn each_environment_is_planned_apart() {
 	})
 	.await;
 }
+
+/// A plan outlives the environment it was recorded for. Archiving the last
+/// application at a rank leaves the group with a plan and nowhere to read or
+/// withdraw it, so the view carries a row with no running version rather than
+/// dropping it.
+// spec: UPG#the-fleet-view
+#[tokio::test(flavor = "multi_thread")]
+async fn a_plan_whose_environment_has_no_live_application_is_still_listed() {
+	commons_tests::server::run(async |mut conn, _, private| {
+		conn.batch_execute(
+			"INSERT INTO versions (id, major, minor, patch, changelog, status) VALUES
+				('cccccccc-0000-0000-0000-0000000000f1', 2, 61, 0, 'x', 'published');
+			INSERT INTO server_groups (id, name) VALUES
+				('cccccccc-0000-0000-0000-000000000001', 'kamaka');
+			INSERT INTO machines (id, group_id) VALUES
+				('cccccccc-0000-0000-0000-0000000000a1', 'cccccccc-0000-0000-0000-000000000001'),
+				('cccccccc-0000-0000-0000-0000000000a2', 'cccccccc-0000-0000-0000-000000000001');
+			INSERT INTO applications (id, host, type, rank, group_id, machine_id) VALUES
+				('cccccccc-0000-0000-0000-0000000000a1', 'https://kamaka.example', 'tamanu-central', 'production', 'cccccccc-0000-0000-0000-000000000001', 'cccccccc-0000-0000-0000-0000000000a1'),
+				('cccccccc-0000-0000-0000-0000000000a2', 'https://kamaka-clone.example', 'tamanu-central', 'clone', 'cccccccc-0000-0000-0000-000000000001', 'cccccccc-0000-0000-0000-0000000000a2');
+			INSERT INTO application_reported_detail (application_id, source, extra, version) VALUES
+				('cccccccc-0000-0000-0000-0000000000a1', 'test', '{}'::jsonb, '2.60.0'),
+				('cccccccc-0000-0000-0000-0000000000a2', 'test', '{}'::jsonb, '2.60.0');",
+		)
+		.await
+		.unwrap();
+
+		private
+			.post("/api/upgrade_plans/record")
+			.json(&json!({
+				"group_id": GROUP,
+				"rank": "clone",
+				"target_version_id": "cccccccc-0000-0000-0000-0000000000f1",
+			}))
+			.await
+			.assert_status_ok();
+
+		conn.batch_execute(
+			"UPDATE applications SET deleted_at = NOW() \
+			 WHERE id = 'cccccccc-0000-0000-0000-0000000000a2';",
+		)
+		.await
+		.unwrap();
+
+		let fleet: Vec<Value> = private
+			.post("/api/upgrade_plans/fleet")
+			.json(&json!({}))
+			.await
+			.json();
+		let clone = fleet
+			.iter()
+			.find(|row| row["rank"] == "clone")
+			.expect("the clone's row survives its last application");
+		assert!(
+			clone["plan"]["id"].is_string(),
+			"and it still carries the plan, which is the only way to withdraw it"
+		);
+		assert!(
+			clone["current_version"].is_null(),
+			"with no running version, since nothing is running"
+		);
+		assert!(
+			clone["behind"].is_null(),
+			"and no distance, rather than a distance from nothing"
+		);
+		assert_eq!(
+			clone["headline"], false,
+			"a synthetic row is never the group's headline"
+		);
+	})
+	.await;
+}
+
+/// An environment that has reported no version cannot be placed against the
+/// newest one, so its distance is null. The dashboard's no-plan list keys off
+/// that distance, so a null is what keeps an unreporting environment out of a
+/// list of things to plan.
+// spec: UPG#the-fleet-view
+#[tokio::test(flavor = "multi_thread")]
+async fn an_environment_that_has_reported_no_version_has_no_distance() {
+	commons_tests::server::run(async |mut conn, _, private| {
+		conn.batch_execute(
+			"INSERT INTO versions (id, major, minor, patch, changelog, status) VALUES
+				('cccccccc-0000-0000-0000-0000000000f2', 2, 63, 0, 'x', 'published');
+			INSERT INTO server_groups (id, name) VALUES
+				('cccccccc-0000-0000-0000-000000000002', 'silent');
+			INSERT INTO machines (id, group_id) VALUES
+				('cccccccc-0000-0000-0000-0000000000a2', 'cccccccc-0000-0000-0000-000000000002');
+			INSERT INTO applications (id, host, type, rank, group_id, machine_id) VALUES
+				('cccccccc-0000-0000-0000-0000000000a2', 'https://silent.example', 'tamanu-central', 'production', 'cccccccc-0000-0000-0000-000000000002', 'cccccccc-0000-0000-0000-0000000000a2');",
+		)
+		.await
+		.unwrap();
+
+		let fleet: Vec<Value> = private
+			.post("/api/upgrade_plans/fleet")
+			.json(&json!({}))
+			.await
+			.json();
+		let silent = fleet
+			.iter()
+			.find(|row| row["group_id"] == UNPLANNED)
+			.expect("the environment is listed");
+		assert!(
+			silent["current_version"].is_null(),
+			"nothing has been reported for it"
+		);
+		assert!(
+			silent["behind"].is_null(),
+			"so there is no distance to the newest published version"
+		);
+		assert!(silent["plan"].is_null());
+	})
+	.await;
+}

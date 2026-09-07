@@ -958,3 +958,206 @@ async fn an_environment_window_does_not_suspend_an_unranked_member() {
 	})
 	.await
 }
+
+/// The Slack notice for an environment's window names the environment, so a
+/// reader can tell that a site's clone went quiet from the site itself going
+/// quiet. Only the group's and the machine's forms were covered.
+// spec: MNT#notification
+#[tokio::test(flavor = "multi_thread")]
+async fn an_environment_windows_notice_names_the_environment() {
+	commons_tests::db::TestDb::run(async |mut conn, _| {
+		let group_id = insert_group(&mut conn).await;
+		insert_ranked_server(&mut conn, group_id, "clone").await;
+		insert_ranked_server(&mut conn, group_id, "production").await;
+
+		MaintenanceWindow::declare(
+			&mut conn,
+			Scope::Group(group_id),
+			Some(ServerRank::Clone),
+			in_an_hour(),
+			Some("refreshing from production"),
+			Some("op"),
+		)
+		.await
+		.expect("declare over the clone");
+
+		let declared = outbox_vars(&mut conn, "maintenance_declared").await;
+		assert_eq!(declared.len(), 1, "declaring notifies once");
+		assert_eq!(
+			declared[0].target, "g clone",
+			"the notice names the environment, not the bare group"
+		);
+	})
+	.await
+}
+
+/// A production environment's window reads as the group's name alone, the way
+/// production trouble does everywhere else, so the two forms are worth pinning
+/// together.
+// spec: MNT#notification
+#[tokio::test(flavor = "multi_thread")]
+async fn a_production_windows_notice_names_the_group_alone() {
+	commons_tests::db::TestDb::run(async |mut conn, _| {
+		let group_id = insert_group(&mut conn).await;
+		insert_ranked_server(&mut conn, group_id, "production").await;
+
+		MaintenanceWindow::declare(
+			&mut conn,
+			Scope::Group(group_id),
+			Some(ServerRank::Production),
+			in_an_hour(),
+			None,
+			Some("op"),
+		)
+		.await
+		.expect("declare over production");
+
+		let declared = outbox_vars(&mut conn, "maintenance_declared").await;
+		assert_eq!(declared[0].target, "g", "production reads as the site");
+	})
+	.await
+}
+
+/// Suspension outlasts a window by the settle period, and the status surfaces
+/// mark those two states apart. An environment's window has to resolve to its
+/// machines for either mark to land on a box, which is the branch nothing
+/// exercised.
+// spec: MNT#settling
+#[tokio::test(flavor = "multi_thread")]
+async fn an_environment_window_settles_over_the_machines_it_covered() {
+	commons_tests::db::TestDb::run(async |mut conn, _| {
+		let group_id = insert_group(&mut conn).await;
+		let (clone_box, _) = insert_ranked_server(&mut conn, group_id, "clone").await;
+		let (production_box, _) = insert_ranked_server(&mut conn, group_id, "production").await;
+
+		let window = MaintenanceWindow::declare(
+			&mut conn,
+			Scope::Group(group_id),
+			Some(ServerRank::Clone),
+			in_an_hour(),
+			None,
+			Some("op"),
+		)
+		.await
+		.expect("declare over the clone");
+
+		let holding = MaintenanceWindow::suspended_targets(&mut conn)
+			.await
+			.expect("suspended");
+		assert!(
+			holding.suspends(clone_box, Some(group_id))
+				&& !holding.settling(clone_box, Some(group_id)),
+			"while it holds, the clone's box reads as being worked on"
+		);
+		assert!(
+			!holding.suspends(production_box, Some(group_id)),
+			"and production's box is not covered at all"
+		);
+
+		MaintenanceWindow::lift(&mut conn, window.id, Some("op"))
+			.await
+			.expect("lift");
+
+		let settling = MaintenanceWindow::suspended_targets(&mut conn)
+			.await
+			.expect("suspended");
+		assert!(
+			settling.suspends(clone_box, Some(group_id)),
+			"lifting does not end suspension, the settle period does"
+		);
+		assert!(
+			settling.settling(clone_box, Some(group_id)),
+			"and the box reads as settling rather than as still being worked on"
+		);
+	})
+	.await
+}
+
+/// A box under two windows is being worked on for as long as either holds, so
+/// its own window ending does not make it settling while its group's still
+/// stands. Getting this wrong marks a box as handed back while an operator is
+/// still in it.
+// spec: MNT#settling
+#[tokio::test(flavor = "multi_thread")]
+async fn a_box_whose_group_window_still_holds_is_not_settling() {
+	commons_tests::db::TestDb::run(async |mut conn, _| {
+		let group_id = insert_group(&mut conn).await;
+		let (machine_id, _) = insert_server(&mut conn, Some(group_id)).await;
+
+		let own = MaintenanceWindow::declare(
+			&mut conn,
+			Scope::Machine(machine_id),
+			None,
+			in_an_hour(),
+			None,
+			Some("op"),
+		)
+		.await
+		.expect("declare over the box");
+		MaintenanceWindow::declare(
+			&mut conn,
+			Scope::Group(group_id),
+			None,
+			in_an_hour(),
+			None,
+			Some("op"),
+		)
+		.await
+		.expect("declare over the group");
+
+		MaintenanceWindow::lift(&mut conn, own.id, Some("op"))
+			.await
+			.expect("lift the box's own");
+
+		let targets = MaintenanceWindow::suspended_targets(&mut conn)
+			.await
+			.expect("suspended");
+		assert!(
+			!targets.settling(machine_id, Some(group_id)),
+			"the group's window still holds over it"
+		);
+	})
+	.await
+}
+
+/// Once the settle period elapses the box is no longer suspended at all, which
+/// is what takes the mark off it rather than leaving it marked for good.
+// spec: MNT#settling
+#[tokio::test(flavor = "multi_thread")]
+async fn a_box_past_the_settle_period_is_no_longer_suspended() {
+	commons_tests::db::TestDb::run(async |mut conn, _| {
+		let group_id = insert_group(&mut conn).await;
+		let (clone_box, _) = insert_ranked_server(&mut conn, group_id, "clone").await;
+
+		let window = MaintenanceWindow::declare(
+			&mut conn,
+			Scope::Group(group_id),
+			Some(ServerRank::Clone),
+			in_an_hour(),
+			None,
+			Some("op"),
+		)
+		.await
+		.expect("declare");
+		MaintenanceWindow::lift(&mut conn, window.id, Some("op"))
+			.await
+			.expect("lift");
+		sql_query("UPDATE maintenance_windows SET ended_at = $2 WHERE id = $1")
+			.bind::<sql_types::Uuid, _>(window.id)
+			.bind::<sql_types::Timestamptz, _>(jiff_diesel::Timestamp::from(
+				Timestamp::now() - SETTLE - SignedDuration::from_mins(1),
+			))
+			.execute(&mut conn)
+			.await
+			.expect("age the end past the settle period");
+
+		let targets = MaintenanceWindow::suspended_targets(&mut conn)
+			.await
+			.expect("suspended");
+		assert!(
+			!targets.suspends(clone_box, Some(group_id)),
+			"nothing is held back once the settle period is out"
+		);
+	})
+	.await
+}

@@ -1281,3 +1281,70 @@ async fn an_incident_names_the_environment_it_targets() {
 	})
 	.await;
 }
+
+/// An application's page shows its own environment's incidents. A group check
+/// asserts something held once for the group, so its incident belongs to the
+/// group and reaches an application's page only where that application is in no
+/// environment: the group's page is where a ranked member's operator reads it.
+// spec: INC#targets
+#[tokio::test(flavor = "multi_thread")]
+async fn an_applications_page_sees_its_own_environments_incidents() {
+	commons_tests::server::run(async |mut conn, _public, private| {
+		let group_id = Uuid::new_v4();
+		let production_id = Uuid::new_v4();
+		let spare_id = Uuid::new_v4();
+		let group_incident = Uuid::new_v4();
+		let group_issue = Uuid::new_v4();
+		conn.batch_execute(&format!(
+			"INSERT INTO server_groups (id, name) VALUES ('{group_id}', 'kamaka');
+			 WITH m AS (INSERT INTO machines (id, group_id) VALUES ('{production_id}', '{group_id}') RETURNING id) INSERT INTO applications (id, host, type, rank, group_id, machine_id) VALUES \
+				('{production_id}', 'https://prod.example.com', 'tamanu-central', 'production', '{group_id}', '{production_id}');
+			 WITH m AS (INSERT INTO machines (id, group_id) VALUES ('{spare_id}', '{group_id}') RETURNING id) INSERT INTO applications (id, host, type, rank, group_id, machine_id) VALUES \
+				('{spare_id}', 'https://spare.example.com', 'tamanu-central', NULL, '{group_id}', '{spare_id}');
+			 INSERT INTO issues (id, created_at, updated_at, server_group_id, source, ref, check_name, observed_result, effective_result, message, active, first_seen, last_seen) VALUES \
+				('{group_issue}', NOW(), NOW(), '{group_id}', 'canopy', 'backup-staleness', 'backup-staleness', 'failed', 'failed', 'the repository is stale', true, NOW(), NOW());
+			 INSERT INTO incidents (id, created_at, updated_at, server_group_id, rank, opened_at) VALUES \
+				('{group_incident}', NOW(), NOW(), '{group_id}', NULL, NOW());
+			 INSERT INTO incident_issues (incident_id, issue_id, joined_at) VALUES \
+				('{group_incident}', '{group_issue}', NOW());"
+		))
+		.await
+		.expect("seed");
+
+		let for_server = async |id: Uuid| -> Vec<serde_json::Value> {
+			let resp = private
+				.post("/api/incidents/list_for_server")
+				.json(&serde_json::json!({ "server_id": id }))
+				.await;
+			resp.assert_status_ok();
+			resp.json()
+		};
+
+		assert!(
+			for_server(production_id).await.is_empty(),
+			"the group's own trouble is not the production environment's",
+		);
+		let spare = for_server(spare_id).await;
+		assert_eq!(
+			spare.len(),
+			1,
+			"an application in no environment answers to the group, so its page carries it",
+		);
+		assert!(spare[0].get("rank").is_some_and(|v| v.is_null()));
+
+		let for_group: Vec<serde_json::Value> = {
+			let resp = private
+				.post("/api/incidents/list_for_group")
+				.json(&serde_json::json!({ "server_group_id": group_id }))
+				.await;
+			resp.assert_status_ok();
+			resp.json()
+		};
+		assert_eq!(
+			for_group.len(),
+			1,
+			"and the group's page carries it whichever ranks the group holds",
+		);
+	})
+	.await;
+}
