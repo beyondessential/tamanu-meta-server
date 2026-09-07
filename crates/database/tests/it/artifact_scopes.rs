@@ -342,3 +342,154 @@ async fn a_held_artifact_cannot_be_given_a_url() {
 	})
 	.await;
 }
+
+/// A range artifact, for the specificity rules that need one.
+fn ranged(artifact_type: &str, pattern: &str, url: &str) -> NewArtifact {
+	NewArtifact {
+		version_id: None,
+		artifact_type: artifact_type.to_owned(),
+		platform: "any".to_owned(),
+		download_url: Some(url.to_owned()),
+		device_id: None,
+		version_range_pattern: Some(pattern.to_owned()),
+		group_id: None,
+		content: None,
+		content_type: None,
+		digest: None,
+		run_id: None,
+	}
+}
+
+/// Register a pair for one type both ways round and return which id won each
+/// time. Resolution has to reorder rather than take what the query happened to
+/// return first, so a rule only counts as pinned when it holds either way.
+async fn winner_either_way(
+	conn: &mut AsyncPgConnection,
+	version: Uuid,
+	winner: impl Fn(&str) -> NewArtifact,
+	loser: impl Fn(&str) -> NewArtifact,
+) -> (Uuid, Uuid, Uuid, Uuid) {
+	let first_winner = Artifact::register(conn, winner("winner-first"))
+		.await
+		.expect("winner registered first");
+	Artifact::register(conn, loser("winner-first"))
+		.await
+		.expect("loser registered second");
+
+	Artifact::register(conn, loser("loser-first"))
+		.await
+		.expect("loser registered first");
+	let second_winner = Artifact::register(conn, winner("loser-first"))
+		.await
+		.expect("winner registered second");
+
+	let offered = Artifact::get_for_version(conn, version, Scope::Unscoped)
+		.await
+		.expect("offered");
+
+	let pick = |artifact_type: &str| {
+		offered
+			.iter()
+			.find(|a| a.artifact_type == artifact_type)
+			.unwrap_or_else(|| panic!("something offered for {artifact_type}"))
+			.id
+	};
+
+	assert_eq!(offered.len(), 2, "one per type, whatever the order");
+	(
+		pick("winner-first"),
+		first_winner.id,
+		pick("loser-first"),
+		second_winner.id,
+	)
+}
+
+/// Within one scope an exact-version artifact is more specific than any range.
+/// The group rule short-circuits ahead of this one, so a test that crosses
+/// scopes never reaches it.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_exact_artifact_displaces_a_range_of_the_same_scope() {
+	TestDb::run(|mut conn, _url| async move {
+		let version = seed_version(&mut conn, 2, 60, 0).await;
+
+		let (a, expected_a, b, expected_b) = winner_either_way(
+			&mut conn,
+			version,
+			|t| unscoped(version, t, "https://x/exact"),
+			|t| ranged(t, "2.60.x", "https://x/range"),
+		)
+		.await;
+
+		assert_eq!(a, expected_a, "exact wins when it is registered first");
+		assert_eq!(b, expected_b, "and when the range is");
+	})
+	.await;
+}
+
+/// Between two ranges that both match, the narrower is more specific.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_narrower_of_two_ranges_wins() {
+	TestDb::run(|mut conn, _url| async move {
+		let version = seed_version(&mut conn, 2, 60, 0).await;
+
+		let (a, expected_a, b, expected_b) = winner_either_way(
+			&mut conn,
+			version,
+			|t| ranged(t, "~2.60.0", "https://x/narrow"),
+			|t| ranged(t, "^2.0.0", "https://x/wide"),
+		)
+		.await;
+
+		assert_eq!(a, expected_a, "narrow wins when it is registered first");
+		assert_eq!(b, expected_b, "and when the wide one is");
+	})
+	.await;
+}
+
+/// Where two ranges cover the same versions neither is narrower, so the
+/// tiebreak is how explicitly each was written: `^` over `~` over `.x`.
+#[tokio::test(flavor = "multi_thread")]
+async fn equally_wide_ranges_fall_back_to_pattern_rank() {
+	TestDb::run(|mut conn, _url| async move {
+		let version = seed_version(&mut conn, 2, 60, 0).await;
+
+		let (a, expected_a, b, expected_b) = winner_either_way(
+			&mut conn,
+			version,
+			|t| ranged(t, "~2.60.0", "https://x/tilde"),
+			|t| ranged(t, "2.60.x", "https://x/wildcard"),
+		)
+		.await;
+
+		assert_eq!(a, expected_a, "~ outranks .x when registered first");
+		assert_eq!(b, expected_b, "and when .x is");
+	})
+	.await;
+}
+
+/// A pattern Canopy cannot parse matches nothing rather than everything, so a
+/// malformed range withholds a file instead of offering it to the whole fleet.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_malformed_range_matches_nothing() {
+	TestDb::run(|mut conn, _url| async move {
+		let version = seed_version(&mut conn, 2, 60, 0).await;
+
+		Artifact::register(
+			&mut conn,
+			ranged("installer", "definitely not a range", "https://x/nope"),
+		)
+		.await
+		.expect("register");
+
+		let offered = Artifact::get_for_version(&mut conn, version, Scope::Unscoped)
+			.await
+			.expect("offered");
+		assert!(offered.is_empty(), "offered to nobody");
+
+		let all = Artifact::get_for_version_all_matches(&mut conn, version, Scope::Fleet)
+			.await
+			.expect("operator view");
+		assert!(all.is_empty(), "and matches the version for no one");
+	})
+	.await;
+}

@@ -218,3 +218,150 @@ async fn a_releaser_cannot_register_for_a_group() {
 	)
 	.await
 }
+
+/// The same read over the client-certificate header the live ingress sets.
+/// Every other test here runs the Envoy path the harness selects by default,
+/// which is not what is deployed.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_owning_group_is_served_over_the_nginx_header() {
+	commons_tests::server::run_with_device_auth_on(
+		commons_servers::device_auth::mtls::ClientCertHeader::Mtls,
+		"machine",
+		async |mut conn, cert, device_id, public, _| {
+			seed(&mut conn).await;
+			enrol(&mut conn, device_id, GROUP_A).await;
+
+			let response = public
+				.get("/versions/2.60.0/artifacts")
+				.add_header("mtls-certificate", &cert)
+				.await;
+			response.assert_status_ok();
+			let artifacts: Vec<serde_json::Value> = response.json();
+
+			assert_eq!(artifacts.len(), 1);
+			assert_eq!(artifacts[0]["id"], THEIRS);
+		},
+	)
+	.await
+}
+
+/// The listing hands out a URL that fetches the bytes, including where the
+/// caller named a range rather than the resolved version. Building the path by
+/// hand instead leaves the synthesis untested.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_offered_download_url_fetches_the_bytes() {
+	commons_tests::server::run_with_device_auth(
+		"machine",
+		async |mut conn, cert, device_id, public, _| {
+			seed(&mut conn).await;
+			enrol(&mut conn, device_id, GROUP_A).await;
+
+			let response = public
+				.get("/versions/2.60.x/artifacts")
+				.add_header("x-forwarded-client-cert", &format!("Cert={cert}"))
+				.await;
+			response.assert_status_ok();
+			let artifacts: Vec<serde_json::Value> = response.json();
+			let url = artifacts[0]["download_url"]
+				.as_str()
+				.expect("a download url")
+				.to_owned();
+
+			assert!(
+				url.ends_with(&format!("/versions/2.60.0/artifacts/{THEIRS}/download")),
+				"names the resolved version, not the range asked for: {url}"
+			);
+
+			let path = url.split_once("://").map_or(url.as_str(), |(_, rest)| {
+				rest.split_once('/').map_or("", |(_, path)| path)
+			});
+			let fetched = public
+				.get(&format!("/{path}"))
+				.add_header("x-forwarded-client-cert", &format!("Cert={cert}"))
+				.await;
+			fetched.assert_status_ok();
+			assert_eq!(fetched.text(), "group a schema");
+		},
+	)
+	.await
+}
+
+/// An artifact of another version is missing in the same way one held for
+/// another group is, so the three refusals a caller can provoke are not
+/// distinguishable from each other.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_artifact_of_another_version_is_refused_identically() {
+	commons_tests::server::run_with_device_auth(
+		"machine",
+		async |mut conn, cert, device_id, public, _| {
+			seed(&mut conn).await;
+			enrol(&mut conn, device_id, GROUP_A).await;
+
+			conn.batch_execute(
+				"INSERT INTO versions (id, major, minor, patch, changelog, status)
+				 VALUES ('44444444-4444-4444-4444-444444444444', 2, 59, 0, '', 'published');
+
+				 INSERT INTO artifacts (id, version_id, platform, artifact_type, download_url)
+				 VALUES ('55555555-5555-5555-5555-555555555555',
+				         '44444444-4444-4444-4444-444444444444', 'any', 'installer',
+				         'https://example.com/old.exe')",
+			)
+			.await
+			.expect("seed another version");
+
+			let elsewhere = public
+				.get("/versions/2.60.0/artifacts/55555555-5555-5555-5555-555555555555/download")
+				.add_header("x-forwarded-client-cert", &format!("Cert={cert}"))
+				.await;
+			let absent = public
+				.get("/versions/2.60.0/artifacts/99999999-9999-9999-9999-999999999999/download")
+				.add_header("x-forwarded-client-cert", &format!("Cert={cert}"))
+				.await;
+
+			assert_eq!(elsewhere.status_code(), StatusCode::NOT_FOUND);
+			assert_eq!(elsewhere.status_code(), absent.status_code());
+			assert_eq!(elsewhere.text(), absent.text());
+		},
+	)
+	.await
+}
+
+/// A device Canopy can place but which sits on no machine, and one on a machine
+/// with no group, are both answered as an anonymous caller is rather than
+/// refused.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_device_with_no_group_is_answered_anonymously() {
+	commons_tests::server::run_with_device_auth(
+		"machine",
+		async |mut conn, cert, device_id, public, _| {
+			seed(&mut conn).await;
+
+			// No machine at all.
+			let response = public
+				.get("/versions/2.60.0/artifacts")
+				.add_header("x-forwarded-client-cert", &format!("Cert={cert}"))
+				.await;
+			response.assert_status_ok();
+			let artifacts: Vec<serde_json::Value> = response.json();
+			assert_eq!(artifacts.len(), 1);
+			assert_eq!(artifacts[0]["id"], UNSCOPED);
+
+			// On a machine, but the machine belongs to no group.
+			conn.batch_execute(&format!(
+				"INSERT INTO machines (name, device_id) VALUES ('ungrouped', '{device_id}')"
+			))
+			.await
+			.expect("enrol without a group");
+
+			let response = public
+				.get("/versions/2.60.0/artifacts")
+				.add_header("x-forwarded-client-cert", &format!("Cert={cert}"))
+				.await;
+			response.assert_status_ok();
+			let artifacts: Vec<serde_json::Value> = response.json();
+			assert_eq!(artifacts.len(), 1);
+			assert_eq!(artifacts[0]["id"], UNSCOPED);
+		},
+	)
+	.await
+}
