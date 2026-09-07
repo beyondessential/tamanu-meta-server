@@ -148,6 +148,15 @@
               "type": "string",
               "format": "uuid"
             }
+          },
+          {
+            "name": "digest",
+            "in": "query",
+            "description": "Algorithm-prefixed digest of the bytes at the URL, e.g. `sha256:2cf24dba…`. Whoever fetches the artifact checks what it got against this; an artifact registered without one is fetched unchecked.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "requestBody": {

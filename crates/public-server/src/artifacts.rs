@@ -128,6 +128,7 @@ pub fn routes() -> OpenApiRouter<AppState> {
 		("artifact_type" = String, Path),
 		("platform" = String, Path),
 		("group" = Option<Uuid>, Query, description = "Group the artifact is for. A releaser credential carries no authorisation for any group, so naming one here is refused."),
+		("digest" = Option<String>, Query, description = "Algorithm-prefixed digest of the bytes at the URL, e.g. `sha256:2cf24dba…`. Whoever fetches the artifact checks what it got against this; an artifact registered without one is fetched unchecked."),
 	),
 	request_body(content = String, description = "Download URL for the artifact, as a plain-text body."),
 	responses(
@@ -142,7 +143,7 @@ async fn create(
 	device: ReleaserDevice,
 	State(db): State<Db>,
 	Path((version, artifact_type, platform)): Path<(String, String, String)>,
-	Query(scope): Query<RegisterScope>,
+	Query(named): Query<RegisterQuery>,
 	headers: axum::http::HeaderMap,
 	url: String,
 ) -> Result<Json<Artifact>> {
@@ -152,7 +153,7 @@ async fn create(
 	// any group, so the group-scoped path is not reachable from this endpoint
 	// at all rather than being refused per group.
 	// spec: ART#registration
-	if scope.group.is_some() {
+	if named.group.is_some() {
 		return Err(AppError::AuthInsufficientPermissions {
 			required: "authorisation for the named group".into(),
 		});
@@ -167,6 +168,11 @@ async fn create(
 			"an artifact needs a download URL".into(),
 		));
 	}
+
+	// A blank digest is no digest: recorded, it says the bytes were checked
+	// against something when nothing was.
+	// spec: ART#digests
+	let digest = named.digest.filter(|d| !d.trim().is_empty());
 
 	let mut db = db.get().await?;
 	let device_id = device.0.0.id;
@@ -217,7 +223,7 @@ async fn create(
 			group_id: None,
 			content: None,
 			content_type: None,
-			digest: None,
+			digest,
 			run_id: None,
 		},
 	)
@@ -227,8 +233,14 @@ async fn create(
 	Ok(Json(Artifact::offered(row, &base, &version)))
 }
 
-/// The group a registration names, where it names one.
+/// What a registration names beside the path.
 #[derive(Debug, serde::Deserialize)]
-struct RegisterScope {
+struct RegisterQuery {
+	/// The group the artifact is for, where it names one.
 	group: Option<Uuid>,
+	/// The digest whoever registers it records, where they record one. An
+	/// unscoped artifact is fetched from its location by the caller rather
+	/// than by Canopy, so this is what that caller checks against.
+	// spec: ART#digests
+	digest: Option<String>,
 }
