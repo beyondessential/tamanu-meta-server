@@ -18,7 +18,7 @@ import PersonIcon from "@mui/icons-material/Person";
 import { useMemo } from "react";
 import { Link as RouterLink } from "react-router-dom";
 import MachineEnclosure, {
-	driftWhileHolding,
+	waveWhileHolding,
 } from "../components/MachineEnclosure";
 import StatusDot from "../components/StatusDot";
 import VersionIndicator from "../components/VersionIndicator";
@@ -318,7 +318,7 @@ function GroupCardLoader({
 					// own rounded corners.
 					overflow: "hidden",
 					transition: "background-color 150ms",
-					bgcolor: occupied ? "action.hover" : undefined,
+					...(occupied ? { bgcolor: "action.hover" } : {}),
 					...(groupWindow
 						? {
 								backgroundImage: (t: Theme) => {
@@ -328,7 +328,7 @@ function GroupCardLoader({
 									);
 									return `repeating-linear-gradient(45deg, ${ink} 0 1px, transparent 1px 7px, ${ink} 7px 8px)`;
 								},
-								...driftWhileHolding(8, !groupWindowSettling),
+								...waveWhileHolding(!groupWindowSettling),
 							}
 						: {}),
 					"&:hover": {
@@ -709,7 +709,7 @@ export function RankedDotStrip({
 											);
 											return `repeating-linear-gradient(45deg, ${ink} 0 1px, transparent 1px 5px, ${ink} 5px 6px)`;
 										},
-										...driftWhileHolding(6, !settling),
+										...waveWhileHolding(!settling, "&::before"),
 									}
 								: {}),
 							// Lighter than the card's own borders, so the rank break

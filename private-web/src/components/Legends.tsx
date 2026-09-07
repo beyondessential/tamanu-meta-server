@@ -2,8 +2,8 @@ import { Box, Chip, Stack, Typography } from "@mui/material";
 import PersonIcon from "@mui/icons-material/Person";
 import type { HealthState, ShortStatus } from "../types";
 import MachineEnclosure, {
-	driftWhileHolding,
 	ownWindowStripes,
+	waveWhileHolding,
 } from "./MachineEnclosure";
 import StatusDot from "./StatusDot";
 import VersionSquare from "./VersionSquare";
@@ -182,7 +182,7 @@ export function MaintenanceLegend() {
 					border: 1,
 					borderColor: "divider",
 					backgroundImage: (theme) => ownWindowStripes(theme, false),
-					...driftWhileHolding(4, true),
+					...waveWhileHolding(true),
 				}}
 			/>
 			<Typography variant="body2" color="text.secondary">

@@ -85,6 +85,7 @@ A dot is hollowed rather than patterned or cut: a pattern needs room to resolve,
 Every target the window reaches has its health muted, marked or not, and carries the window and when it ends, so a failing target under maintenance is not read as one nobody has noticed.
 A target serving out the settle period carries the mark still, distinguished from one whose window holds, so lifting a window shows on the target rather than only on the window.
 The two are told apart by motion as well as by weight: a holding window's mark moves and a settling one is still, so movement on the page means someone is in there now.
+A mark with room to it is crossed, and one drawn small pulses, a sweep being gone before it resolves on a few pixels.
 A reader who has asked for less motion gets the weight alone.
 The status legend names both marks.
 

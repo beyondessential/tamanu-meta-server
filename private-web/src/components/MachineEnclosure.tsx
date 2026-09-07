@@ -26,30 +26,63 @@ const STATES = {
 	never: { border: "action.disabled", fill: "action.disabledBackground" },
 } as const;
 
+/// A skeleton wave passing over a mark whose window still holds. Work under
+/// way moves and a target serving out the settle period is still, so movement
+/// says someone is in there now.
+///
+/// The row draws its rank label in `::after`, so the surface says which
+/// pseudo-element the wave may take.
+// spec: MNT#presentation
+const WAVE = keyframes`
+	0% { transform: translateX(-100%); }
+	60%, 100% { transform: translateX(100%); }
+`;
+
+/// Every box a window reaches is muted, whether or not it carries the mark: all
+/// of them are out of play, so a failing one does not read as one nobody has
+/// noticed.
+// spec: MNT#presentation
+const MUTED = 0.55;
+
+/// The pill is a band a few pixels tall, so a wave crossing it is gone before
+/// it resolves. It pulses the whole mark instead, on the wave's timing, from
+/// the muted weight a suspended box already carries.
+// spec: MNT#presentation
+const PILL_PULSE = keyframes`
+	0%, 100% { opacity: ${MUTED}; }
+	50% { opacity: ${MUTED - 0.2}; }
+`;
+
+export function waveWhileHolding(
+	holding: boolean,
+	on: "&::before" | "&::after" = "&::after",
+) {
+	if (!holding) return {};
+	const layer = {
+		content: '""',
+		position: "absolute",
+		inset: 0,
+		transform: "translateX(-100%)",
+		pointerEvents: "none",
+		background: (theme: Theme) =>
+			`linear-gradient(90deg, transparent, ${alpha(theme.palette.text.primary, 0.08)}, transparent)`,
+		animation: `${WAVE} 2s linear 0.5s infinite`,
+	};
+	return {
+		position: "relative",
+		overflow: "hidden",
+		[on]: layer,
+		"@media (prefers-reduced-motion: reduce)": {
+			[on]: { ...layer, animation: "none", background: "none" },
+		},
+	};
+}
+
 // The mark belongs at the grain the operator declared at, so only a window over
 // the box itself stripes its icon. The ink is the text colour rather than a
 // fixed grey, so the stripes hold on a dark card, and they carry their own
 // phase so no background offset exposes the gradient's tile as a seam.
 // spec: MNT#presentation
-/// A slow drift for stripes at `pitch`, for a window that still holds. Work
-/// under way moves and a target serving out the settle period is still, so
-/// motion says someone is in there now.
-///
-/// The travel is one whole tile of the surface's own pitch, measured along the
-/// 45 degree gradient, or the loop shows a seam every time it restarts.
-// spec: MNT#presentation
-export function driftWhileHolding(pitch: number, holding: boolean) {
-	if (!holding) return {};
-	const travel = keyframes`
-		from { background-position: 0 0; }
-		to { background-position: ${pitch * Math.SQRT2}px 0; }
-	`;
-	return {
-		animation: `${travel} 3s linear infinite`,
-		"@media (prefers-reduced-motion: reduce)": { animation: "none" },
-	};
-}
-
 export function ownWindowStripes(theme: Theme, settling: boolean): string {
 	// The settle period drops much further than the window itself: nobody is in
 	// there any more, and the mark is only saying watching has yet to resume.
@@ -150,15 +183,22 @@ export default function MachineEnclosure({
 					borderColor: state.border,
 					bgcolor: state.fill,
 					backgroundImage: (theme) =>
-						ownWindow ? ownWindowStripes(theme, settling) : undefined,
-					...driftWhileHolding(4, ownWindow && !settling),
+						ownWindow ? ownWindowStripes(theme, settling) : "none",
+					...(ownWindow && !settling
+						? {
+								animation: `${PILL_PULSE} 2s ease-in-out 0.5s infinite`,
+								"@media (prefers-reduced-motion: reduce)": {
+									animation: "none",
+								},
+							}
+						: {}),
 					// Every suspended box is muted, whether the window is its own
 					// or reaches it through its environment or its group: all of
 					// them are out of play, so a failing one does not read as one
 					// nobody has noticed. The stripes stay at the grain the window
 					// was declared over; the fade says which boxes it caught.
 					// spec: MNT#presentation
-					opacity: maintained ? 0.55 : 1,
+					opacity: maintained ? MUTED : 1,
 
 					borderRadius: "999px",
 					// The band keeps its old proportion to the dot inside it: both

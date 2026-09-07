@@ -39,12 +39,13 @@ const UNMONITORED_MASK =
 const RING = "2px solid";
 const SETTLING_CENTRE = 0.3;
 
-// Work under way breathes and a target serving out the settle period is still,
-// the same rule the striped grains follow: motion says someone is in there now.
+// A dot has no room for a wave to cross, so it pulses instead, on the timing
+// the wave runs at. Work under way moves and a target serving out the settle
+// period is still, the same rule every grain follows.
 // spec: MNT#presentation
-const BREATHE = keyframes`
+const PULSE = keyframes`
 	0%, 100% { opacity: 1; }
-	50% { opacity: 0.45; }
+	50% { opacity: 0.4; }
 `;
 
 /// What colour this target's dot takes.
@@ -134,7 +135,7 @@ export default function StatusDot({
 					WebkitMaskImage: mask,
 					...(maintained && !settling
 						? {
-								animation: `${BREATHE} 2.4s ease-in-out infinite`,
+								animation: `${PULSE} 2s ease-in-out 0.5s infinite`,
 								"@media (prefers-reduced-motion: reduce)": {
 									animation: "none",
 								},
