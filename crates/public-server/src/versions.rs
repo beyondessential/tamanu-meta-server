@@ -88,6 +88,26 @@ async fn latest_matching_ready(
 		.ok_or(AppError::NoMatchingVersions)
 }
 
+/// The version a read names.
+///
+/// An exact version is answered for itself: a known issue says a version is not
+/// one to move to, which is a fact about where a fleet should go rather than
+/// about what is published for where it already is. A range is a question about
+/// where to go, so it resolves to the latest ready version it covers.
+// spec: ART#what-a-version-offers
+async fn version_named(conn: &mut AsyncPgConnection, named: &str) -> Result<Version> {
+	if let Ok(exact) = node_semver::Version::parse(named) {
+		let version =
+			Version::get_by_version(conn, commons_types::version::VersionStr(exact)).await?;
+		if version.status != commons_types::version::VersionStatus::Published {
+			return Err(AppError::NoMatchingVersions);
+		}
+		return Ok(version);
+	}
+
+	latest_matching_ready(conn, VersionRange::from_str(named)?.0).await
+}
+
 pub fn routes() -> OpenApiRouter<AppState> {
 	let api = OpenApiRouter::new()
 		.routes(routes!(list))
@@ -513,8 +533,7 @@ async fn list_artifacts(
 	headers: axum::http::HeaderMap,
 ) -> Result<Json<Vec<Artifact>>> {
 	let mut db = db.get().await?;
-	let version = VersionRange::from_str(&version)?;
-	let version = latest_matching_ready(&mut db, version.0).await?;
+	let version = version_named(&mut db, &version).await?;
 	let scope = caller_scope(&mut db, device).await?;
 
 	Ok(Json(
@@ -646,8 +665,7 @@ async fn download_artifact(
 	use uuid::Uuid;
 
 	let mut db = db.get().await?;
-	let version = VersionRange::from_str(&version)?;
-	let version = latest_matching_ready(&mut db, version.0).await?;
+	let version = version_named(&mut db, &version).await?;
 	let scope = caller_scope(&mut db, device).await?;
 
 	let artifact_uuid = Uuid::parse_str(&artifact_id)

@@ -646,3 +646,190 @@ async fn a_registration_with_nothing_in_it_is_refused() {
 	)
 	.await
 }
+
+/// Archiving a machine takes its group with it. The device is unbound and its
+/// keys deactivated in one transaction, so the credential that was offered the
+/// group's artifact reads as no identity at all afterwards rather than keeping
+/// the group the box used to be in.
+// spec: ART#who-is-offered-a-group-scoped-artifact, FLT#archival
+#[tokio::test(flavor = "multi_thread")]
+async fn an_archived_machine_s_credential_keeps_no_group() {
+	commons_tests::server::run_with_device_auth(
+		"machine",
+		async |mut conn, cert, device_id, public, _| {
+			const MACHINE: &str = "cccccccc-cccc-cccc-cccc-cccccccccccc";
+			seed(&mut conn).await;
+			conn.batch_execute(&format!(
+				"INSERT INTO machines (id, name, group_id, device_id)
+				 VALUES ('{MACHINE}', 'box', '{GROUP_A}', '{device_id}')"
+			))
+			.await
+			.expect("enrol machine");
+
+			let before = public
+				.get("/versions/2.60.0/artifacts")
+				.add_header("x-forwarded-client-cert", &format!("Cert={cert}"))
+				.await;
+			let artifacts: Vec<serde_json::Value> = before.json();
+			assert_eq!(artifacts[0]["id"], THEIRS, "its own group's, to start with");
+
+			database::machines::Machine::archive(&mut conn, MACHINE.parse().unwrap())
+				.await
+				.expect("archive");
+
+			let after = public
+				.get("/versions/2.60.0/artifacts")
+				.add_header("x-forwarded-client-cert", &format!("Cert={cert}"))
+				.await;
+			after.assert_status_ok();
+			let artifacts: Vec<serde_json::Value> = after.json();
+			assert_eq!(artifacts.len(), 1);
+			assert_eq!(
+				artifacts[0]["id"], UNSCOPED,
+				"answered as a read carrying no identity is"
+			);
+
+			let refused = public
+				.get(&format!("/versions/2.60.0/artifacts/{THEIRS}/download"))
+				.add_header("x-forwarded-client-cert", &format!("Cert={cert}"))
+				.await;
+			assert_eq!(
+				refused.status_code(),
+				StatusCode::NOT_FOUND,
+				"and the bytes it used to be served are out of reach"
+			);
+		},
+	)
+	.await
+}
+
+/// A read that serves everyone downgrades a credential it cannot place to
+/// anonymous. A fault reaching that decision is not a credential it cannot
+/// place: answered anonymously it hands a machine that has a group the
+/// unscoped set and presents it as that machine's answer.
+// spec: ART#who-is-offered-a-group-scoped-artifact
+#[tokio::test(flavor = "multi_thread")]
+async fn a_fault_placing_a_credential_is_not_anonymity() {
+	commons_tests::server::run_with_device_auth(
+		"machine",
+		async |mut conn, cert, device_id, public, _| {
+			seed(&mut conn).await;
+			enrol(&mut conn, device_id, GROUP_A).await;
+
+			// Resolving an identity reads device_keys. Taking the table away is
+			// the only way from here to make that read fail rather than miss.
+			conn.batch_execute("DROP TABLE device_keys CASCADE")
+				.await
+				.expect("drop device_keys");
+
+			let response = public
+				.get("/versions/2.60.0/artifacts")
+				.add_header("x-forwarded-client-cert", &format!("Cert={cert}"))
+				.await;
+
+			assert_eq!(
+				response.status_code(),
+				StatusCode::INTERNAL_SERVER_ERROR,
+				"a caller that cannot be placed is told so, not answered as nobody"
+			);
+		},
+	)
+	.await
+}
+
+/// An unscoped artifact is read from its location by the caller rather than by
+/// Canopy, so its digest is what that caller checks what it fetched against.
+/// A releaser records one where it has one, and an artifact registered without
+/// one is fetched unchecked rather than fetched against a blank.
+// spec: ART#digests
+#[tokio::test(flavor = "multi_thread")]
+async fn a_releaser_records_the_digest_it_publishes() {
+	commons_tests::server::run_with_device_auth(
+		"releaser",
+		async |mut conn, cert, _device_id, public, _| {
+			seed(&mut conn).await;
+
+			let recorded = public
+				.post("/artifacts/2.60.0/installer/windows?digest=sha256:abcd")
+				.add_header("x-forwarded-client-cert", &format!("Cert={cert}"))
+				.text("https://example.com/x.exe")
+				.await;
+			recorded.assert_status_ok();
+			let recorded: serde_json::Value = recorded.json();
+			assert_eq!(recorded["digest"], "sha256:abcd");
+
+			for query in ["", "?digest=", "?digest=%20%20"] {
+				let response = public
+					.post(&format!("/artifacts/2.60.0/installer/linux{query}"))
+					.add_header("x-forwarded-client-cert", &format!("Cert={cert}"))
+					.text("https://example.com/x.deb")
+					.await;
+				response.assert_status_ok();
+				let artifact: serde_json::Value = response.json();
+				assert!(
+					artifact["digest"].is_null(),
+					"a blank digest is no digest, but got {artifact}"
+				);
+			}
+		},
+	)
+	.await
+}
+
+/// A device is offered the artifacts of the version it reports running, and a
+/// known issue on that version does not withhold them. A known issue says a
+/// version is not one to move to, and the versions carrying one are exactly the
+/// ones a fleet is still sitting on and still needs a schema for. A range is a
+/// question about where to go, so it still resolves past the version.
+// spec: ART#what-a-version-offers
+#[tokio::test(flavor = "multi_thread")]
+async fn a_known_issue_does_not_withhold_a_version_s_own_artifacts() {
+	commons_tests::server::run_with_device_auth(
+		"machine",
+		async |mut conn, cert, device_id, public, _| {
+			seed(&mut conn).await;
+			enrol(&mut conn, device_id, GROUP_A).await;
+
+			// An open known issue has no upper bound, so it covers 2.60.0 and
+			// every later patch of that line.
+			conn.batch_execute(
+				"INSERT INTO version_known_issues
+				 (author, description, min_major, min_minor, min_patch)
+				 VALUES ('admin', 'broken', 2, 60, 0)",
+			)
+			.await
+			.expect("seed a known issue over 2.60.0");
+
+			let offered = public
+				.get("/versions/2.60.0/artifacts")
+				.add_header("x-forwarded-client-cert", &format!("Cert={cert}"))
+				.await;
+			offered.assert_status_ok();
+			let artifacts: Vec<serde_json::Value> = offered.json();
+			assert_eq!(artifacts.len(), 1);
+			assert_eq!(
+				artifacts[0]["id"], THEIRS,
+				"the group's own schema for the version it is on"
+			);
+
+			let bytes = public
+				.get(&format!("/versions/2.60.0/artifacts/{THEIRS}/download"))
+				.add_header("x-forwarded-client-cert", &format!("Cert={cert}"))
+				.await;
+			bytes.assert_status_ok();
+			assert_eq!(bytes.text(), "group a schema");
+
+			// The same known issue still keeps a range off that version.
+			let ranged = public
+				.get("/versions/2.60.x/artifacts")
+				.add_header("x-forwarded-client-cert", &format!("Cert={cert}"))
+				.await;
+			assert_eq!(
+				ranged.status_code(),
+				StatusCode::NOT_FOUND,
+				"a range has nothing ready to land on"
+			);
+		},
+	)
+	.await
+}

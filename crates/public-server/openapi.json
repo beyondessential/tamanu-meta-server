@@ -158,6 +158,15 @@
               "type": "string",
               "format": "uuid"
             }
+          },
+          {
+            "name": "digest",
+            "in": "query",
+            "description": "Algorithm-prefixed digest of the bytes at the URL, e.g. `sha256:2cf24dba…`, for an unscoped artifact. Whoever fetches it checks what it got against this; one registered without a digest is fetched unchecked. Ignored for a group-scoped artifact, whose digest Canopy takes of the bytes itself.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "requestBody": {

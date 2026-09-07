@@ -139,6 +139,7 @@ pub fn routes() -> OpenApiRouter<AppState> {
 		("platform" = String, Path),
 		("group" = Option<Uuid>, Query, description = "Group the artifact is for. A releaser credential carries no authorisation for any group; a component that produces a group's artifacts is authorised for that group alone."),
 		("run" = Option<Uuid>, Query, description = "The run that produced the artifact, where one produced it."),
+		("digest" = Option<String>, Query, description = "Algorithm-prefixed digest of the bytes at the URL, e.g. `sha256:2cf24dba…`, for an unscoped artifact. Whoever fetches it checks what it got against this; one registered without a digest is fetched unchecked. Ignored for a group-scoped artifact, whose digest Canopy takes of the bytes itself."),
 	),
 	request_body(content = String, description = "For an unscoped artifact, its download URL as a plain-text body. For a group-scoped one, the artifact's bytes, which Canopy holds and verifies against the digest it takes of them."),
 	responses(
@@ -153,7 +154,7 @@ async fn create(
 	device: AuthDevice,
 	State(db): State<Db>,
 	Path((version, artifact_type, platform)): Path<(String, String, String)>,
-	Query(scope): Query<RegisterScope>,
+	Query(named): Query<RegisterQuery>,
 	headers: axum::http::HeaderMap,
 	body: axum::body::Bytes,
 ) -> Result<Json<Artifact>> {
@@ -168,7 +169,7 @@ async fn create(
 	// group's artifacts registers for that group under an authorisation
 	// defined with those artifacts, and for no other.
 	// spec: ART#registration
-	let held = match scope.group {
+	let held = match named.group {
 		None => {
 			if !matches!(role, DeviceRole::Releaser | DeviceRole::Admin) {
 				return Err(AppError::AuthInsufficientPermissions {
@@ -251,6 +252,11 @@ async fn create(
 		.and_then(|v| v.to_str().ok())
 		.map(str::to_owned);
 
+	// A blank digest is no digest: recorded, it says the bytes were checked
+	// against something when nothing was.
+	// spec: ART#digests
+	let named_digest = named.digest.filter(|d| !d.trim().is_empty());
+
 	let download_url = match held {
 		None => {
 			let url = String::from_utf8(body.to_vec())
@@ -279,13 +285,18 @@ async fn create(
 			device_id: Some(device_id),
 			version_range_pattern,
 			group_id: held,
-			// Canopy verifies the bytes against the digest as they arrive, so it
-			// records the digest of what it actually took in.
+			// Canopy holds a group-scoped artifact, so it records the digest of
+			// what it actually took in. An unscoped one is fetched from its
+			// location by the caller, so its digest is whatever that caller
+			// recorded.
 			// spec: ART#digests
-			digest: held.map(|_| digest_of(&body)),
+			digest: match held {
+				Some(_) => Some(digest_of(&body)),
+				None => named_digest,
+			},
 			content: held.map(|_| body.to_vec()),
 			content_type: held.and(content_type),
-			run_id: scope.run,
+			run_id: named.run,
 		},
 	)
 	.await?;
@@ -295,11 +306,18 @@ async fn create(
 }
 
 /// What a registration names beyond the path: the group an artifact is for,
-/// and the run that produced it.
+/// the run that produced it, and the digest of an unscoped one.
 #[derive(Debug, serde::Deserialize)]
-struct RegisterScope {
+struct RegisterQuery {
+	/// The group the artifact is for, where it names one.
 	group: Option<Uuid>,
+	/// The run that produced the artifact, where one produced it.
 	run: Option<Uuid>,
+	/// The digest whoever registers it records, where they record one. An
+	/// unscoped artifact is fetched from its location by the caller rather
+	/// than by Canopy, so this is what that caller checks against.
+	// spec: ART#digests
+	digest: Option<String>,
 }
 
 /// Cap on the bytes Canopy will hold for one artifact, matching the operator

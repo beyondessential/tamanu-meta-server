@@ -5435,6 +5435,13 @@ export interface components {
             content_base64?: string | null;
             /** @description Media type of those bytes. */
             content_type?: string | null;
+            /**
+             * @description Algorithm-prefixed digest of those bytes, e.g. `sha256:2cf24dba…`.
+             *     Required when a group is named: Canopy checks the bytes against it as
+             *     they arrive and refuses the registration on a mismatch, so a corrupted
+             *     upload is refused while whoever sent it is still there to send it again.
+             */
+            digest?: string | null;
             /** @description Download URL, for an artifact Canopy records a location for. */
             download_url?: string | null;
             /**

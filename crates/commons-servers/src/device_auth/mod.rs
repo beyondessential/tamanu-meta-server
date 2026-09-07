@@ -108,7 +108,11 @@ where
 			Ok(device) => Ok(Some(device)),
 			// A credential Canopy cannot place is anonymous, not refused: a
 			// stale certificate must not fail a path that serves everyone.
-			Err(_) => Ok(None),
+			// A fault on the way to that answer places nothing either way, and
+			// answering it anonymously serves the unscoped set to a machine
+			// that has a group and calls it the truth.
+			Err(err) if err.to_http_status().is_client_error() => Ok(None),
+			Err(err) => Err(err),
 		}
 	}
 }

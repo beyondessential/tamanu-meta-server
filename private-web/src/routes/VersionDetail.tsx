@@ -651,13 +651,23 @@ function EditArtifactRow({
 
 /// Canopy holds a group-scoped artifact's bytes, and the API takes them in the
 /// JSON body, so the file is read here rather than posted as a multipart form.
-async function encodeFile(file: File): Promise<string> {
-	const buffer = new Uint8Array(await file.arrayBuffer());
+/// The digest goes with them: Canopy checks the bytes it received against it and
+/// refuses the registration on a mismatch.
+async function readFile(file: File): Promise<{ base64: string; digest: string }> {
+	const buffer = await file.arrayBuffer();
+	const bytes = new Uint8Array(buffer);
+
 	const chunks: string[] = [];
-	for (let i = 0; i < buffer.length; i += 0x8000) {
-		chunks.push(String.fromCharCode(...buffer.subarray(i, i + 0x8000)));
+	for (let i = 0; i < bytes.length; i += 0x8000) {
+		chunks.push(String.fromCharCode(...bytes.subarray(i, i + 0x8000)));
 	}
-	return btoa(chunks.join(""));
+
+	const hash = new Uint8Array(await crypto.subtle.digest("SHA-256", buffer));
+	const hex = Array.from(hash)
+		.map((b) => b.toString(16).padStart(2, "0"))
+		.join("");
+
+	return { base64: btoa(chunks.join("")), digest: `sha256:${hex}` };
 }
 
 const MAX_HELD_ARTIFACT_BYTES = 32 * 1024 * 1024;
@@ -684,14 +694,16 @@ function CreateArtifactForm({
 	const submit = async (e: React.FormEvent) => {
 		e.preventDefault();
 		try {
+			const contents = file ? await readFile(file) : null;
 			await action.call({
 				version_id: versionId,
 				artifact_type: type,
 				platform,
 				download_url: scoped ? null : url,
 				group_id: scoped ? groupId : null,
-				content_base64: file ? await encodeFile(file) : null,
+				content_base64: contents?.base64 ?? null,
 				content_type: file ? file.type || null : null,
+				digest: contents?.digest ?? null,
 			});
 			setType("");
 			setPlatform("");
