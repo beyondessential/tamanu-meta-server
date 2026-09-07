@@ -486,3 +486,130 @@ async fn a_report_carrying_both_records_only_the_build() {
 	)
 	.await
 }
+
+/// A schema the builder registers is what the group's machines are later
+/// offered, byte for byte, under the version it was built for.
+///
+/// The one device stands in for both the builder and a machine of the group:
+/// which credential may do which is settled by the refusals above and in
+/// `artifact_scopes`, and what this asserts is that the bytes survive the trip
+/// and that the listing's own `download_url` is the one that fetches them.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_registered_schema_is_offered_back_byte_for_byte() {
+	commons_tests::server::run_with_device_auth(
+		"backup-restore",
+		async |mut conn, cert, device_id, public, _| {
+			seed(&mut conn, device_id).await;
+			conn.batch_execute(&format!(
+				"UPDATE machines SET device_id = '{device_id}' WHERE id = '{MACHINE}'"
+			))
+			.await
+			.expect("enrol the machine");
+
+			let sql = "CREATE VIEW reporting.encounters AS SELECT 1;";
+
+			public
+				.post(&format!(
+					"/artifacts/2.60.0/reporting-schema/any?group={GROUP}"
+				))
+				.add_header("x-forwarded-client-cert", &format!("Cert={cert}"))
+				.add_header("content-type", "application/sql")
+				.text(sql)
+				.await
+				.assert_status_ok();
+
+			let listing = public
+				.get("/versions/2.60.0/artifacts")
+				.add_header("x-forwarded-client-cert", &format!("Cert={cert}"))
+				.await;
+			listing.assert_status_ok();
+
+			let artifacts: Vec<serde_json::Value> = listing.json();
+			let schema = artifacts
+				.iter()
+				.find(|a| a["artifact_type"] == "reporting-schema")
+				.expect("the group's schema is offered");
+
+			assert_eq!(schema["platform"], "any");
+			assert_eq!(schema["group_id"], GROUP);
+			assert_eq!(
+				schema["version_id"], VERSION,
+				"published against the exact version, not a range"
+			);
+			assert!(
+				schema["version_range_pattern"].is_null(),
+				"a schema follows the migrations one version applies: {schema}"
+			);
+			assert_eq!(
+				schema["digest"].as_str().expect("a digest"),
+				database::artifacts::digest_of(sql.as_bytes()),
+				"the digest describes the bytes canopy took in"
+			);
+
+			// Follow the URL the listing handed out rather than rebuilding it,
+			// so the offer a device actually receives is what gets fetched.
+			let offered_url = schema["download_url"].as_str().expect("a download url");
+			let path = offered_url
+				.split_once("/versions/")
+				.map(|(_, rest)| format!("/versions/{rest}"))
+				.expect("the offer names a versions path");
+
+			let download = public
+				.get(&path)
+				.add_header("x-forwarded-client-cert", &format!("Cert={cert}"))
+				.await;
+			download.assert_status_ok();
+			assert_eq!(download.text(), sql);
+		},
+	)
+	.await
+}
+
+/// A facility is offered the same schema as its group's centrals: a schema
+/// follows the group and the version rather than the application it was built
+/// from, and the build only ever runs against a central's snapshot.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_facility_is_offered_the_same_schema_as_its_centrals() {
+	commons_tests::server::run_with_device_auth(
+		"machine",
+		async |mut conn, cert, device_id, public, _| {
+			// A builder of its own, since the authenticated device here is the
+			// facility's machine rather than the consumer that built the schema.
+			let consumer = uuid::Uuid::new_v4();
+			conn.batch_execute(&format!(
+				"INSERT INTO devices (id, role) VALUES ('{consumer}', 'backup-restore')"
+			))
+			.await
+			.expect("the builder device");
+			seed(&mut conn, consumer).await;
+
+			let digest = database::artifacts::digest_of(b"the group's schema");
+			conn.batch_execute(&format!(
+				"INSERT INTO artifacts
+				   (version_id, platform, artifact_type, group_id, content, content_type, digest)
+				 VALUES ('{VERSION}', 'any', 'reporting-schema', '{GROUP}',
+				         'the group''s schema'::bytea, 'application/sql', '{digest}');
+
+				 INSERT INTO machines (id, name, group_id, device_id)
+				 VALUES (gen_random_uuid(), 'facility-box', '{GROUP}', '{device_id}')"
+			))
+			.await
+			.expect("seed the schema and a facility box");
+
+			let listing = public
+				.get("/versions/2.60.0/artifacts")
+				.add_header("x-forwarded-client-cert", &format!("Cert={cert}"))
+				.await;
+			listing.assert_status_ok();
+
+			let artifacts: Vec<serde_json::Value> = listing.json();
+			let schema = artifacts
+				.iter()
+				.find(|a| a["artifact_type"] == "reporting-schema")
+				.expect("a facility's device is offered its group's schema");
+
+			assert_eq!(schema["group_id"], GROUP);
+		},
+	)
+	.await
+}
