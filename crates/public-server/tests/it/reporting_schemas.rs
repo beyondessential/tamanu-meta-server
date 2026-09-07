@@ -142,6 +142,52 @@ async fn a_built_pair_drops_off_the_worklist() {
 	.await
 }
 
+/// An intent may advertise `redact` alongside building schemas, and a schema is
+/// built against the group's own data rather than a masked copy. Canopy owns
+/// the masking parameters, and sending them unset is what tells a consumer not
+/// to redact, so an entry carrying the defaults declared with the intent would
+/// have the builder mask the very configuration it is reading.
+///
+/// spec: RST#the-masking-manifest
+#[tokio::test(flavor = "multi_thread")]
+async fn a_schema_build_is_never_told_to_redact() {
+	commons_tests::server::run_with_device_auth(
+		"backup-restore",
+		async |mut conn, cert, device_id, public, _| {
+			seed(&mut conn, device_id).await;
+
+			conn.batch_execute(&format!(
+				"UPDATE restore_consumer_capabilities
+				 SET semantics = '[\"check\", \"once\", \"migrate\", \"reporting-schema\", \"redact\"]'::jsonb,
+				     params = '{{\"redaction_manifest_url\": {{\"type\": \"text\",
+				                  \"default\": \"https://masks.example/{{version}}.yaml\"}}}}'::jsonb
+				 WHERE consumer_device_id = '{device_id}'",
+			))
+			.await
+			.expect("advertise redaction too");
+
+			let response = public
+				.get("/restore-worklist")
+				.add_header("x-forwarded-client-cert", &format!("Cert={cert}"))
+				.await;
+			response.assert_status_ok();
+			let entries: Vec<serde_json::Value> = response.json();
+
+			let ours: Vec<&serde_json::Value> = entries
+				.iter()
+				.filter(|e| e["intent"] == "schema-build")
+				.collect();
+			assert_eq!(ours.len(), 1, "the pair is still dispatched");
+			assert_eq!(
+				ours[0]["params"]["redaction_manifest_url"],
+				serde_json::Value::Null,
+				"the parameter is advertised, and sent unset"
+			);
+		},
+	)
+	.await
+}
+
 /// A builder registers artifacts for the group its declaration covers, and is
 /// refused another's the same way it would be refused a group that does not
 /// exist.

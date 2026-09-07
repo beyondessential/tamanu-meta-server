@@ -311,6 +311,16 @@ async fn worklist(
 				continue;
 			}
 
+			// Sending the masking parameters unset is what tells a consumer not
+			// to redact, so an intent advertising both has to be told here as
+			// well rather than inheriting the defaults declared with it.
+			// spec: RST#the-masking-manifest
+			let params = if owns_masking {
+				masked_params(&params, None)
+			} else {
+				params.clone()
+			};
+
 			let members =
 				database::applications::Application::list_live_in_group(&mut conn, d.group_id)
 					.await?;
