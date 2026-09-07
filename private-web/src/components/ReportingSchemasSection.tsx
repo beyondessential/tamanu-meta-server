@@ -145,7 +145,9 @@ function StateChip({
 function SectionHeading() {
 	return (
 		<Box sx={{ mb: 1 }}>
-			<Typography variant="h6">Reporting schemas</Typography>
+			<Typography variant="h6" component="h2">
+				Reporting schemas
+			</Typography>
 			<Typography variant="body2" color="text.secondary">
 				One per version this group runs or is moving to, built from a replica
 				of the group's own data.

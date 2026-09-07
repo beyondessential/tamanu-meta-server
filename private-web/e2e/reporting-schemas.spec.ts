@@ -84,6 +84,9 @@ test.describe("reporting schemas", () => {
 
 		const section = page.getByTestId("reporting-schemas");
 		await expect(section).toBeVisible();
+		await expect(
+			section.getByRole("heading", { level: 2, name: "Reporting schemas" }),
+		).toBeVisible();
 		await expect(section.getByTestId("reporting-schema-row")).toHaveCount(2);
 		await expect(section.getByText("2.59.0")).toBeVisible();
 		await expect(section.getByText("2.60.0")).toBeVisible();

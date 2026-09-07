@@ -311,9 +311,6 @@ impl RestoreReplica {
 		.await
 	}
 
-	/// Whether an enabled declaration covers `(consumer, group, type)` — the
-	/// authorization check for issuing restore credentials. A server-scoped or
-	/// a group-wide declaration both satisfy it.
 	/// Whether a consumer may register group-scoped artifacts for this group:
 	/// it has an enabled declaration covering the group whose intent it
 	/// advertises as building reporting schemas, and no other group.
@@ -353,6 +350,9 @@ impl RestoreReplica {
 		Ok(n > 0)
 	}
 
+	/// Whether an enabled declaration covers `(consumer, group, type)` — the
+	/// authorization check for issuing restore credentials. A server-scoped or
+	/// a group-wide declaration both satisfy it.
 	pub async fn authorizes(
 		db: &mut AsyncPgConnection,
 		consumer_device_id: Uuid,
