@@ -7,7 +7,7 @@ use database::{
 	artifacts::{Artifact, NewArtifact, Scope, digest_of},
 	diesel_async::AsyncPgConnection,
 };
-use diesel_async::SimpleAsyncConnection;
+use diesel_async::{RunQueryDsl, SimpleAsyncConnection};
 use uuid::Uuid;
 
 async fn seed_version(conn: &mut AsyncPgConnection, major: i32, minor: i32, patch: i32) -> Uuid {
@@ -657,6 +657,135 @@ async fn an_archived_group_is_still_named() {
 			.await
 			.expect("names");
 		assert_eq!(names.get(&theirs).map(String::as_str), Some("kamaka"));
+	})
+	.await;
+}
+
+/// Two artifacts of one version differing only by platform. Renaming one onto
+/// the other's identity is the operator's own input, so it is refused as a
+/// conflict rather than reaching the unique index as a database fault.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_rename_onto_an_existing_identity_is_refused() {
+	TestDb::run(|mut conn, _url| async move {
+		let version = seed_version(&mut conn, 2, 60, 0).await;
+
+		Artifact::register(
+			&mut conn,
+			unscoped(version, "installer", "https://example.com/win.exe"),
+		)
+		.await
+		.expect("register");
+
+		let mut linux = unscoped(version, "installer", "https://example.com/lin.deb");
+		linux.platform = "linux".to_owned();
+		let linux = Artifact::register(&mut conn, linux)
+			.await
+			.expect("register");
+
+		let refused = Artifact::update(
+			&mut conn,
+			linux.id,
+			"installer".to_owned(),
+			"any".to_owned(),
+			Some("https://example.com/lin.deb".to_owned()),
+		)
+		.await;
+		assert!(
+			matches!(refused, Err(commons_errors::AppError::Conflict(_))),
+			"a taken identity is a conflict, got {refused:?}"
+		);
+
+		// The rename is refused whole: the artifact keeps the platform it had.
+		let all = Artifact::get_for_version_all_matches(&mut conn, version, Scope::Fleet)
+			.await
+			.expect("list");
+		let mut platforms: Vec<_> = all.iter().map(|a| a.platform.as_str()).collect();
+		platforms.sort_unstable();
+		assert_eq!(platforms, vec!["any", "linux"]);
+	})
+	.await;
+}
+
+const UP: &str =
+	include_str!("../../../../migrations/2026-09-06-211612-0000_group_scoped_artifacts/up.sql");
+const DOWN: &str =
+	include_str!("../../../../migrations/2026-09-06-211612-0000_group_scoped_artifacts/down.sql");
+
+#[derive(diesel::QueryableByName)]
+struct TextRow {
+	#[diesel(sql_type = diesel::sql_types::Text)]
+	value: String,
+}
+
+/// Reverting drops the artifacts Canopy holds, since the bytes have nowhere to
+/// go once the column does, and leaves the unscoped ones as they were. Nothing
+/// else runs these migrations backwards, so a `down.sql` that cannot reverse
+/// would only be found on the box it was needed on.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_group_scope_migration_reverses() {
+	TestDb::run(|mut conn, _url| async move {
+		let version = seed_version(&mut conn, 2, 60, 0).await;
+		let group = seed_group(&mut conn, "kamaka").await;
+
+		Artifact::register(
+			&mut conn,
+			unscoped(version, "installer", "https://example.com/x.exe"),
+		)
+		.await
+		.expect("register");
+		Artifact::register(
+			&mut conn,
+			held(version, "reporting-schema", group, b"kamaka schema"),
+		)
+		.await
+		.expect("register");
+
+		conn.batch_execute(DOWN).await.expect("revert");
+
+		let remaining: Vec<TextRow> =
+			diesel::sql_query("SELECT download_url AS value FROM artifacts")
+				.load(&mut conn)
+				.await
+				.expect("read back");
+		assert_eq!(
+			remaining
+				.iter()
+				.map(|r| r.value.as_str())
+				.collect::<Vec<_>>(),
+			vec!["https://example.com/x.exe"],
+			"the held artifact goes with the column that held it"
+		);
+
+		let columns: Vec<TextRow> = diesel::sql_query(
+			"SELECT column_name AS value FROM information_schema.columns \
+			 WHERE table_name = 'artifacts' \
+			 AND column_name IN ('group_id', 'content', 'content_type', 'digest', 'run_id')",
+		)
+		.load(&mut conn)
+		.await
+		.expect("read columns");
+		assert!(columns.is_empty(), "every added column is gone");
+
+		let nullable: Vec<TextRow> = diesel::sql_query(
+			"SELECT is_nullable AS value FROM information_schema.columns \
+			 WHERE table_name = 'artifacts' AND column_name = 'download_url'",
+		)
+		.load(&mut conn)
+		.await
+		.expect("read nullability");
+		assert_eq!(
+			nullable[0].value, "NO",
+			"an artifact rests at a location again"
+		);
+
+		conn.batch_execute(UP).await.expect("re-apply");
+
+		Artifact::register(
+			&mut conn,
+			held(version, "reporting-schema", group, b"kamaka schema"),
+		)
+		.await
+		.expect("a group-scoped artifact registers again");
 	})
 	.await;
 }

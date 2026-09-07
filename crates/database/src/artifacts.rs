@@ -358,16 +358,27 @@ impl Artifact {
 			_ => {}
 		}
 
-		diesel::update(artifacts.filter(id.eq(artifact_id)))
+		match diesel::update(artifacts.filter(id.eq(artifact_id)))
 			.set((
 				artifact_type.eq(new_type),
 				platform.eq(new_platform),
 				download_url.eq(new_url),
 			))
 			.execute(db)
-			.await?;
-
-		Ok(())
+			.await
+		{
+			Ok(_) => Ok(()),
+			// A rename onto an identity another artifact already holds is the
+			// operator's own input, so it is refused as a conflict rather than
+			// left to surface as a database fault.
+			Err(diesel::result::Error::DatabaseError(
+				diesel::result::DatabaseErrorKind::UniqueViolation,
+				_,
+			)) => Err(AppError::Conflict(
+				"an artifact of that type and platform is already registered".into(),
+			)),
+			Err(e) => Err(AppError::from(e)),
+		}
 	}
 
 	pub async fn delete(db: &mut AsyncPgConnection, artifact_id: Uuid) -> Result<()> {
