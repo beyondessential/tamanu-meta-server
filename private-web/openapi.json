@@ -7982,7 +7982,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "tailscale-user": []
+          }
+        ]
       }
     },
     "/api/versions/get_version_detail": {

@@ -640,3 +640,59 @@ async fn a_registration_with_nothing_in_it_is_refused() {
 	)
 	.await
 }
+
+/// Archiving a machine takes its group with it. The device is unbound and its
+/// keys deactivated in one transaction, so the credential that was offered the
+/// group's artifact reads as no identity at all afterwards rather than keeping
+/// the group the box used to be in.
+// spec: ART#who-is-offered-a-group-scoped-artifact, FLT#archival
+#[tokio::test(flavor = "multi_thread")]
+async fn an_archived_machine_s_credential_keeps_no_group() {
+	commons_tests::server::run_with_device_auth(
+		"machine",
+		async |mut conn, cert, device_id, public, _| {
+			const MACHINE: &str = "cccccccc-cccc-cccc-cccc-cccccccccccc";
+			seed(&mut conn).await;
+			conn.batch_execute(&format!(
+				"INSERT INTO machines (id, name, group_id, device_id)
+				 VALUES ('{MACHINE}', 'box', '{GROUP_A}', '{device_id}')"
+			))
+			.await
+			.expect("enrol machine");
+
+			let before = public
+				.get("/versions/2.60.0/artifacts")
+				.add_header("x-forwarded-client-cert", &format!("Cert={cert}"))
+				.await;
+			let artifacts: Vec<serde_json::Value> = before.json();
+			assert_eq!(artifacts[0]["id"], THEIRS, "its own group's, to start with");
+
+			database::machines::Machine::archive(&mut conn, MACHINE.parse().unwrap())
+				.await
+				.expect("archive");
+
+			let after = public
+				.get("/versions/2.60.0/artifacts")
+				.add_header("x-forwarded-client-cert", &format!("Cert={cert}"))
+				.await;
+			after.assert_status_ok();
+			let artifacts: Vec<serde_json::Value> = after.json();
+			assert_eq!(artifacts.len(), 1);
+			assert_eq!(
+				artifacts[0]["id"], UNSCOPED,
+				"answered as a read carrying no identity is"
+			);
+
+			let refused = public
+				.get(&format!("/versions/2.60.0/artifacts/{THEIRS}/download"))
+				.add_header("x-forwarded-client-cert", &format!("Cert={cert}"))
+				.await;
+			assert_eq!(
+				refused.status_code(),
+				StatusCode::NOT_FOUND,
+				"and the bytes it used to be served are out of reach"
+			);
+		},
+	)
+	.await
+}

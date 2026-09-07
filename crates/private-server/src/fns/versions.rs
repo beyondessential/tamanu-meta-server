@@ -444,6 +444,7 @@ pub async fn get_version_detail(
 	post,
 	path = "/get_version_artifacts",
 	tag = "versions",
+	security(("tailscale-user" = [])),
 	request_body = VersionStringArgs,
 	responses(
 		(status = 200, body = Vec<ArtifactData>),
@@ -452,6 +453,11 @@ pub async fn get_version_detail(
 )]
 pub async fn get_version_artifacts(
 	State(state): State<AppState>,
+	// Every group's artifacts, digests and group names, which ART discloses to
+	// an operator and to nobody else. The tagged-device layer above only turns
+	// away a caller that both carries no identity and comes from the tailnet.
+	// spec: ART#who-is-offered-a-group-scoped-artifact, ADM
+	_user: TailscaleUser,
 	Json(args): Json<VersionStringArgs>,
 ) -> Result<Json<Vec<ArtifactData>>> {
 	let mut conn = state.db_read.get().await?;
