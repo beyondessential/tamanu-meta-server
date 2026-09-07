@@ -56,14 +56,14 @@ const MACHINE_ENTRIES: Array<{
 		up: "up",
 		health: "healthy",
 		maintained: true,
-		label: "Hatched: under maintenance (being worked on)",
+		label: "Blue: under maintenance (being worked on)",
 	},
 	{
 		up: "up",
 		health: "healthy",
 		maintained: true,
 		settling: true,
-		label: "Faintly hatched: maintenance just ended, watching resumes shortly",
+		label: "Pale blue: maintenance just ended, watching resumes shortly",
 	},
 	{
 		up: "up",

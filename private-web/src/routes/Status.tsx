@@ -10,6 +10,7 @@ import {
 	Tooltip,
 	Typography,
 	useTheme,
+	type Theme,
 } from "@mui/material";
 import { alpha } from "@mui/material/styles";
 import BarChartIcon from "@mui/icons-material/BarChart";
@@ -546,12 +547,25 @@ function OperatorSegment({
 // same column grid wherever the line breaks fall. Spacing comes from the
 // container's `gap`, not per-dot margins (StatusDot's inline right-margin is
 // neutralised).
-const DIVIDER_LIGHT = "rgba(0, 0, 0, 0.06)";
+/// Lighter than the card's own border, so a rank break reads as subordinate to
+/// the card structure. Taken from the text colour rather than from black, so it
+/// survives a dark ground.
+const dividerLight = (theme: Theme) => alpha(theme.palette.text.primary, 0.08);
+
+/// The rank spelled out behind its own row, faint enough to read only when
+/// looked for. Dark mode needs more of it to reach the same faintness, since it
+/// is lifting off a dark card rather than sinking into a light one.
+const rankLabel = (theme: Theme) =>
+	alpha(theme.palette.text.primary, theme.palette.mode === "dark" ? 0.20 : 0.11);
+
+/// The dot is sized to its cell, since a flex item wider than the cell holding
+/// it is squeezed on one axis only and draws as an oval.
+const DOT_SIZE = "0.9em";
 
 const dotCellSx = {
 	display: "inline-flex",
-	width: "0.85em",
-	height: "0.85em",
+	width: DOT_SIZE,
+	height: DOT_SIZE,
 	alignItems: "center",
 	justifyContent: "center",
 	flex: "none",
@@ -617,11 +631,9 @@ export function RankedDotStrip({
 							// is the card's border, so it cannot also be the rule
 							// inside it.
 							...(index > 0
-								? { borderTop: 1, borderColor: DIVIDER_LIGHT }
+								? { borderTop: 1, borderColor: dividerLight }
 								: {}),
-							// The rank spelled out behind its own row, faint enough to
-							// read only when looked for. It replaces the triangle that
-							// used to mark the break without naming it, and needs no
+							// The rank named behind its own row rather than taking
 							// space of its own.
 							"&::after": {
 								content: "attr(data-rank)",
@@ -633,7 +645,7 @@ export function RankedDotStrip({
 								fontWeight: 500,
 								letterSpacing: "0.06em",
 								textTransform: "uppercase",
-								color: tone ? alpha(tone, 0.55) : "rgba(0, 0, 0, 0.09)",
+								color: tone ? alpha(tone, 0.55) : rankLabel,
 								pointerEvents: "none",
 								zIndex: 0,
 							},
@@ -647,6 +659,10 @@ export function RankedDotStrip({
 								name={box.lead.machine_name}
 								maintained={box.lead.machine_maintained}
 								settling={box.lead.machine_maintenance_settling}
+								describes={box.applications.map(
+									(m) =>
+										`${m.name}${m.rank ? ` · ${m.rank}` : ""} · ${m.type}`,
+								)}
 							>
 								{box.applications.map((m) => (
 									<Box key={m.id} component="span" sx={dotCellSx}>
@@ -654,9 +670,7 @@ export function RankedDotStrip({
 											up={m.up}
 											health={m.health}
 											monitored={m.is_monitored}
-											title={`${m.name}${
-												m.rank ? ` · ${m.rank}` : ""
-											} · ${m.type}`}
+											size={DOT_SIZE}
 										/>
 									</Box>
 								))}

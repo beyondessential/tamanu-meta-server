@@ -74,7 +74,8 @@ The ending says whether an operator lifted the window or its expected end passed
 
 ## Presentation
 
-A target under a window presents its own health and reachability, and is marked as under maintenance wherever they are presented as they currently stand, in the manner an unmonitored machine is marked and distinguishable from one (see [CHK](checks.md), "Monitoring gate").
+A target under a window presents its own health and reachability, and is marked as under maintenance wherever they are presented as they currently stand, distinguishably from a machine nobody is watching (see [CHK](checks.md), "Monitoring gate").
+Where a machine is drawn small, as a mark on a dot rather than a row of its own, the mark is a fill in a hue no health state uses: a pattern needs room to resolve and a target's own colours are already spoken for.
 Its health is muted and carries the window and when it ends, so a failing machine under maintenance is not read as one nobody has noticed.
 A target serving out the settle period carries the mark still, distinguished from one whose window holds, so lifting a window shows on the target rather than only on the window.
 The status legend names both marks.

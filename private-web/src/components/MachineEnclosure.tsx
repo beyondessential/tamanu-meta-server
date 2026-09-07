@@ -1,4 +1,5 @@
-import { Box, Tooltip } from "@mui/material";
+import { Box, Tooltip, type Theme } from "@mui/material";
+import { alpha } from "@mui/material/styles";
 import type { ReactNode } from "react";
 import type { HealthState, ShortStatus } from "../types";
 
@@ -17,25 +18,39 @@ import type { HealthState, ShortStatus } from "../types";
 // box, and everything on it is unreachable with it.
 // spec: CHK#presentation
 const STATES = {
-	fine: { border: "rgba(0, 0, 0, 0.18)", fill: "transparent" },
+	fine: { border: "divider", fill: "transparent" },
 	degraded: { border: "warning.main", fill: "rgba(237, 108, 2, 0.10)" },
 	down: { border: "error.main", fill: "rgba(211, 47, 47, 0.12)" },
 	// A box that has never reported: outlined like any other, washed out rather
 	// than coloured, since there is nothing yet to say about it.
-	never: { border: "rgba(0, 0, 0, 0.12)", fill: "action.disabledBackground" },
+	never: { border: "action.disabled", fill: "action.disabledBackground" },
 } as const;
 
 // A window hatches the pill's wash rather than cutting through it the way a
 // dot's does. A mask on the enclosure would clip the dots inside it as well,
-// which would say something about the applications — and a window is the box's.
+// which would say something about the applications, and a window is the box's.
 // The hatch runs the same way as the dot's maintenance cut, so the two read as
 // one idea at either grain.
+//
+// A window washes the pill in the info hue, which is what marks maintenance
+// everywhere else in the interface and is a colour no machine state uses: the
+// ring's grey, orange and red are spoken for, so a blue wash cannot be read as
+// a health verdict. The border still says how the box is, so a degraded box
+// under a window shows both.
+//
+// A wash rather than a hatch because the ring is a few pixels wide: a pattern
+// needs room to resolve into stripes, while a fill reads at any size. The
+// settling state is the same hue washed back, and two strengths of a solid
+// colour are separable where two strengths of a hatch are not.
 // spec: MNT#presentation
-const MAINTAINED_HATCH =
-	"repeating-linear-gradient(45deg, transparent 0 4px, rgba(0, 0, 0, 0.16) 4px 8px)";
-
-const SETTLING_HATCH =
-	"repeating-linear-gradient(45deg, transparent 0 4px, rgba(0, 0, 0, 0.10) 4px 8px)";
+function maintenanceWash(theme: Theme, settling: boolean): string {
+	// The deeper blue for the state that matters: blue against the green of a
+	// healthy dot is an adjacent-hue boundary, and `info.main` leaves the two
+	// closer than the mark deserves.
+	return settling
+		? alpha(theme.palette.info.main, 0.28)
+		: alpha(theme.palette.info.dark, 0.85);
+}
 
 function enclosureState(up: ShortStatus, health: HealthState) {
 	if (up === "gone") return STATES.never;
@@ -58,6 +73,7 @@ export default function MachineEnclosure({
 	name,
 	maintained = false,
 	settling = false,
+	describes,
 	children,
 }: {
 	up: ShortStatus;
@@ -74,11 +90,15 @@ export default function MachineEnclosure({
 	 * settle period, still suspended but no longer being worked on. */
 	// spec: MNT#settling
 	settling?: boolean;
+	/** What the dots inside stand for, one line each. The enclosure names them
+	 * so the dots need no tooltip of their own: two tooltips over the same few
+	 * pixels open together and overlap, and the reader loses both. */
+	describes?: string[];
 	/** The dots for the applications on this machine. */
 	children: ReactNode;
 }) {
 	const state = enclosureState(up, health);
-	const title = [
+	const box = [
 		name,
 		enclosureTitle(up, health),
 		maintained
@@ -88,9 +108,13 @@ export default function MachineEnclosure({
 			: null,
 	]
 		.filter(Boolean)
-		.join(" — ");
+		.join(" · ");
+	const title = [box, ...(describes ?? [])].join("\n");
 	return (
-		<Tooltip title={title}>
+		<Tooltip
+			title={title}
+			slotProps={{ tooltip: { sx: { whiteSpace: "pre-line" } } }}
+		>
 			<Box
 				component="span"
 				data-maintenance={
@@ -102,17 +126,14 @@ export default function MachineEnclosure({
 					gap: "0.35em",
 					border: 1,
 					borderColor: state.border,
-					bgcolor: state.fill,
-					backgroundImage: maintained
-						? settling
-							? SETTLING_HATCH
-							: MAINTAINED_HATCH
-						: undefined,
+					bgcolor: (theme) =>
+						maintained ? maintenanceWash(theme, settling) : state.fill,
+
 					borderRadius: "999px",
-					// px and py must stay the same. In em rather than px, so
-					// the pill scales with the type around it.
-					px: "0.1875em",
-					py: "0.1875em",
+					// The band keeps its old proportion to the dot inside it: both
+					// grew together, so the ring reads as the same ring.
+					px: "0.2em",
+					py: "0.2em",
 					// The dots carry their own right margin, which the pill's own
 					// gap replaces.
 					"& span": { marginRight: 0 },
