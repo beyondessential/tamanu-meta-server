@@ -13,6 +13,7 @@
 //! Recipients are **mandatory** (`CANOPY_RECOVERY_VAULT_KEYS`) — the backups pod
 //! refuses to start without them (see the `backups` bin). The blob is written to
 //! the same key each tick; bucket versioning keeps the history.
+// spec: ESC
 
 use std::{collections::BTreeMap, time::Duration};
 

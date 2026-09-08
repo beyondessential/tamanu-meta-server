@@ -90,5 +90,5 @@ Engine-specific detail a device reported that Canopy does not model is available
 ## Passphrase recovery
 
 Because Canopy owns the only copy of each passphrase, the ability to recover it without Canopy is verified, not assumed.
-Recovery is a ceremony: a passphrase is escrowed encrypted to a set of offline recipient keys, and an operator periodically proves the recipients can still decrypt it.
+Recovery is a ceremony: a passphrase is escrowed encrypted to a set of offline recipient keys (see [ESC](../jobs/escrow.md)), and an operator periodically proves the recipients can still decrypt it.
 The ceremony is recorded so staleness — too long since the last successful proof — is visible.
