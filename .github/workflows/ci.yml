@@ -217,6 +217,24 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: just semver-checks
 
+  api-crate:
+    name: API client
+    runs-on: ubuntu-latest
+    # The published client is a cargo project of its own (see release-plz.toml), so
+    # the workspace jobs above do not build, lint, format-check or test it. Without
+    # this, the one crate with outside consumers is the one nothing checks.
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - name: Configure toolchain
+        run: |
+          rustup toolchain install --profile minimal --no-self-update stable --component clippy,rustfmt
+          rustup default stable
+      - uses: taiki-e/install-action@v2.86.1
+        with:
+          tool: just
+      - uses: Swatinem/rust-cache@v2
+      - run: just check-api-crate
+
   # Dummy job to have a stable name for PR requirements
   tests-pass:
     if: always() # always run even if dependencies fail
@@ -228,6 +246,7 @@ jobs:
       - e2e
       - generated
       - semver
+      - api-crate
     runs-on: ubuntu-latest
     steps:
       - uses: re-actors/alls-green@release/v1

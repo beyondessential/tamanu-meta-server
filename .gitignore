@@ -1,4 +1,5 @@
 /target
+/crates/canopy-api/target
 Rocket.toml
 *.dump
 *.crt
