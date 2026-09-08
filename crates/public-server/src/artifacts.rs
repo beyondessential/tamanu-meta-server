@@ -4,12 +4,16 @@ use axum::{
 };
 use canopy_utoipa_axum::{router::OpenApiRouter, routes};
 use commons_errors::{AppError, ProblemDetailsSchema, Result};
-use commons_servers::device_auth::{AuthDevice, ReleaserDevice};
-use commons_types::version::{VersionStatus, VersionStr};
+use commons_servers::device_auth::AuthDevice;
+use commons_types::{
+	device::DeviceRole,
+	version::{VersionStatus, VersionStr},
+};
 use database::{
 	Db,
-	artifacts::{Artifact as ArtifactRow, NewArtifact, Scope},
+	artifacts::{Artifact as ArtifactRow, NewArtifact, Scope, digest_of},
 	machines::Machine,
+	restore::RestoreReplica,
 	versions::{NewVersion, Version},
 };
 use diesel::SelectableHelper as _;
@@ -99,9 +103,12 @@ pub fn routes() -> OpenApiRouter<AppState> {
 	OpenApiRouter::new().routes(routes!(create))
 }
 
-/// Register a downloadable artifact for a version or version range.
+/// Register an artifact for a version or version range.
 ///
-/// Requires a device certificate with the releaser role (or admin). The
+/// A releaser registers an artifact that rests elsewhere, naming its location.
+/// A component that produces a group's artifacts registers one for that group,
+/// sending the bytes on this connection; Canopy holds them and is issued no
+/// credential to any store. The
 /// path identifies the version the artifact belongs to — either an exact
 /// version (e.g. `2.10.5`) or a semver range pattern (e.g. `2.10.x`,
 /// `^2.10.0`) — followed by the artifact's type and target platform. The
@@ -122,15 +129,19 @@ pub fn routes() -> OpenApiRouter<AppState> {
 	path = "/{version}/{artifact_type}/{platform}",
 	operation_id = "register_artifact",
 	tag = "artifacts",
-	security(("releaser-device" = [])),
+	security(
+		("releaser-device" = []),
+		("backup-restore-device" = []),
+	),
 	params(
 		("version" = String, Path, description = "Exact semver (e.g. `2.10.5`) or range pattern (e.g. `2.10.x`, `^2.10.0`)."),
 		("artifact_type" = String, Path),
 		("platform" = String, Path),
-		("group" = Option<Uuid>, Query, description = "Group the artifact is for. A releaser credential carries no authorisation for any group, so naming one here is refused."),
-		("digest" = Option<String>, Query, description = "Algorithm-prefixed digest of the bytes at the URL, e.g. `sha256:2cf24dba…`. Whoever fetches the artifact checks what it got against this; an artifact registered without one is fetched unchecked."),
+		("group" = Option<Uuid>, Query, description = "Group the artifact is for. A releaser credential carries no authorisation for any group; a component that produces a group's artifacts is authorised for that group alone."),
+		("run" = Option<Uuid>, Query, description = "The run that produced the artifact, where one produced it."),
+		("digest" = Option<String>, Query, description = "Algorithm-prefixed digest of the bytes at the URL, e.g. `sha256:2cf24dba…`, for an unscoped artifact. Whoever fetches it checks what it got against this; one registered without a digest is fetched unchecked. Ignored for a group-scoped artifact, whose digest Canopy takes of the bytes itself."),
 	),
-	request_body(content = String, description = "Download URL for the artifact, as a plain-text body."),
+	request_body(content = String, description = "For an unscoped artifact, its download URL as a plain-text body. For a group-scoped one, the artifact's bytes, which Canopy holds and verifies against the digest it takes of them."),
 	responses(
 		(status = 200, body = Artifact),
 		(status = 400, body = ProblemDetailsSchema),
@@ -140,42 +151,58 @@ pub fn routes() -> OpenApiRouter<AppState> {
 )]
 #[axum::debug_handler]
 async fn create(
-	device: ReleaserDevice,
+	device: AuthDevice,
 	State(db): State<Db>,
 	Path((version, artifact_type, platform)): Path<(String, String, String)>,
 	Query(named): Query<RegisterQuery>,
 	headers: axum::http::HeaderMap,
-	url: String,
+	body: axum::body::Bytes,
 ) -> Result<Json<Artifact>> {
 	use node_semver::{Range, Version as SemverVersion};
 
-	// A releaser registers unscoped artifacts and carries no authorisation for
-	// any group, so the group-scoped path is not reachable from this endpoint
-	// at all rather than being refused per group.
-	// spec: ART#registration
-	if named.group.is_some() {
-		return Err(AppError::AuthInsufficientPermissions {
-			required: "authorisation for the named group".into(),
-		});
-	}
-
-	// A blank body is no location at all. The constraint only tests for NULL,
-	// so an empty string would pass it and leave an artifact nothing can be
-	// fetched from.
-	// spec: ART#where-an-artifact-rests
-	if url.trim().is_empty() {
-		return Err(AppError::BadRequest(
-			"an artifact needs a download URL".into(),
-		));
-	}
-
-	// A blank digest is no digest: recorded, it says the bytes were checked
-	// against something when nothing was.
-	// spec: ART#digests
-	let digest = named.digest.filter(|d| !d.trim().is_empty());
-
 	let mut db = db.get().await?;
-	let device_id = device.0.0.id;
+	let device_id = device.0.id;
+	let role = device.0.role;
+
+	// Who may register what. A releaser registers unscoped artifacts and
+	// carries no authorisation for any group. A component that produces a
+	// group's artifacts registers for that group under an authorisation
+	// defined with those artifacts, and for no other.
+	// spec: ART#registration
+	let held = match named.group {
+		None => {
+			if !matches!(role, DeviceRole::Releaser | DeviceRole::Admin) {
+				return Err(AppError::AuthInsufficientPermissions {
+					required: "releaser or admin".into(),
+				});
+			}
+			None
+		}
+		Some(group) => {
+			let authorised = role == DeviceRole::Admin
+				|| RestoreReplica::authorizes_schema_artifacts(&mut db, device_id, group).await?;
+			if !authorised {
+				// Refused the same way whether the group exists or not, so the
+				// endpoint is not a directory of which groups have a builder.
+				return Err(AppError::AuthInsufficientPermissions {
+					required: "an enabled declaration building this group's artifacts".into(),
+				});
+			}
+
+			if body.len() > MAX_HELD_ARTIFACT_BYTES {
+				return Err(AppError::BadRequest(format!(
+					"artifact is larger than the {MAX_HELD_ARTIFACT_BYTES} byte limit"
+				)));
+			}
+			if body.is_empty() {
+				return Err(AppError::BadRequest(
+					"a group-scoped artifact carries its bytes".into(),
+				));
+			}
+
+			Some(group)
+		}
+	};
 
 	let (version_id, version_range_pattern) = if let Ok(semver) = SemverVersion::parse(&version) {
 		let version_str = VersionStr(semver);
@@ -206,9 +233,46 @@ async fn create(
 
 		(Some(version_id), None)
 	} else {
+		// A schema follows the migrations one exact version applies, and Canopy
+		// resolves a range artifact for every version it covers.
+		// spec: RPT#the-build-contract
+		if artifact_type == REPORTING_SCHEMA_TYPE {
+			return Err(AppError::BadRequest(
+				"a reporting schema is registered against an exact version, not a range".into(),
+			));
+		}
+
 		Range::parse(&version).map_err(|_| AppError::custom("Invalid version or version range"))?;
 
 		(None, Some(version.clone()))
+	};
+
+	let content_type = headers
+		.get(axum::http::header::CONTENT_TYPE)
+		.and_then(|v| v.to_str().ok())
+		.map(str::to_owned);
+
+	// A blank digest is no digest: recorded, it says the bytes were checked
+	// against something when nothing was.
+	// spec: ART#digests
+	let named_digest = named.digest.filter(|d| !d.trim().is_empty());
+
+	let download_url = match held {
+		None => {
+			let url = String::from_utf8(body.to_vec())
+				.map_err(|_| AppError::BadRequest("download URL is not valid UTF-8".into()))?;
+			// A blank body is no location at all. The constraint only tests for
+			// NULL, so an empty string would pass it and leave an artifact
+			// nothing can be fetched from.
+			// spec: ART#where-an-artifact-rests
+			if url.trim().is_empty() {
+				return Err(AppError::BadRequest(
+					"an artifact needs a download URL".into(),
+				));
+			}
+			Some(url)
+		}
+		Some(_) => None,
 	};
 
 	let row = ArtifactRow::register(
@@ -217,14 +281,22 @@ async fn create(
 			version_id,
 			platform,
 			artifact_type,
-			download_url: Some(url),
+			download_url,
 			device_id: Some(device_id),
 			version_range_pattern,
-			group_id: None,
-			content: None,
-			content_type: None,
-			digest,
-			run_id: None,
+			group_id: held,
+			// Canopy holds a group-scoped artifact, so it records the digest of
+			// what it actually took in. An unscoped one is fetched from its
+			// location by the caller, so its digest is whatever that caller
+			// recorded.
+			// spec: ART#digests
+			digest: match held {
+				Some(_) => Some(digest_of(&body)),
+				None => named_digest,
+			},
+			content: held.map(|_| body.to_vec()),
+			content_type: held.and(content_type),
+			run_id: named.run,
 		},
 	)
 	.await?;
@@ -233,14 +305,24 @@ async fn create(
 	Ok(Json(Artifact::offered(row, &base, &version)))
 }
 
-/// What a registration names beside the path.
+/// What a registration names beyond the path: the group an artifact is for,
+/// the run that produced it, and the digest of an unscoped one.
 #[derive(Debug, serde::Deserialize)]
 struct RegisterQuery {
 	/// The group the artifact is for, where it names one.
 	group: Option<Uuid>,
+	/// The run that produced the artifact, where one produced it.
+	run: Option<Uuid>,
 	/// The digest whoever registers it records, where they record one. An
 	/// unscoped artifact is fetched from its location by the caller rather
 	/// than by Canopy, so this is what that caller checks against.
 	// spec: ART#digests
 	digest: Option<String>,
 }
+
+/// Cap on the bytes Canopy will hold for one artifact, matching the operator
+/// path. A reporting schema is a SQL file; anything approaching this is not one.
+const MAX_HELD_ARTIFACT_BYTES: usize = 32 * 1024 * 1024;
+
+/// The artifact type a reporting-schema build publishes.
+const REPORTING_SCHEMA_TYPE: &str = "reporting-schema";
