@@ -9,8 +9,8 @@ It continuously escrows that state so it can be recovered without Canopy, and do
 
 ## Scope
 
-This spec covers the escrow itself: what it is encrypted to, where it is written, and what recovering from it takes.
-What each area puts in it is that area's to say, and the areas that do are the backup control plane (see [BKJ](backup.md)) and the environment inventory (see [INV](../private-server/inventory.md)).
+This spec covers the escrow itself: what it is encrypted to, where it is written, what recovering from it takes, and how the ability to recover is kept proven.
+What each area puts in it is that area's to say.
 
 ## The mechanism
 
@@ -33,12 +33,11 @@ It records when it was taken, since a recovery has to know how stale what it hol
 
 A value Canopy could not read when the escrow was taken is written as absent and logged, rather than failing the whole write: a snapshot missing one group's passphrase is worth more than none at all.
 
-## Verification
+## The verification ceremony
 
-An escrow nobody has ever decrypted is not a recovery path.
-An operator periodically proves the recipients can still decrypt what Canopy writes, and Canopy records when that was last done and against which recipients (see [BKO](../private-server/backup.md)).
+An escrow nobody has ever decrypted is not a recovery path, so the ability to recover is proven rather than assumed.
+Canopy issues a challenge, an operator answers it with a recipient's private key, and Canopy records the proof.
+The private half never reaches Canopy: what it holds is that somebody demonstrated they still have one.
 
-## Out of scope
-
-- What any one area escrows, which each area's spec states.
-- The operator ceremony's own flow (see [BKO](../private-server/backup.md)).
+A proof names the recipients it was made against, so a changed recipient set does not inherit the last one.
+Canopy surfaces how long it has been since the last successful proof, since recipients quietly rotating away is a recovery gap nobody would otherwise see.

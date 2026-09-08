@@ -15,6 +15,8 @@ Each member is a machine, and carries its identifier, its name, the address it i
 A member names which of those variables are secret.
 The environment's own variables are served once beside the members.
 
+Canopy serves the environment's shape and the caller renders it, so no configuration-management tool's own inventory format appears in the response.
+
 An inventory carries secret values, so it is served to an administrator (see [ADM](admin-access.md)), and a run reads it as the administrator running it.
 
 ## Inventory variables
@@ -88,9 +90,3 @@ A group presents each of its environments: the machines in it and the variables 
 A secret variable appears by name, with the scope it is set at and when it last changed, and never its value.
 Where a lease or a maintenance window holds over the environment, the presentation names it.
 The invocation a run is started with is given, filled in with Canopy's address and the environment's identity.
-
-## Out of scope
-
-- Performing a configuration run, scheduling one, or triggering one.
-- The inventory format of any particular configuration-management tool: Canopy serves the environment's shape, and the caller renders it.
-- Checking that an upgrade run reaches the version its plan names: Canopy learns what a group runs from the group, after the fact (see [UPG](upgrade-plans.md), "When a plan is met").
