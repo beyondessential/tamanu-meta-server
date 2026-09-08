@@ -169,6 +169,72 @@ jobs:
           retention-days: 5
           if-no-files-found: ignore
 
+  generated:
+    name: Generated files
+    runs-on: ubuntu-latest
+    # The committed OpenAPI documents and the generated API client must be what
+    # the current code produces. Regenerating needs no database and no network:
+    # the documents come from compile-time annotations and the client comes from
+    # the committed public document.
+    steps:
+      - name: Free up space
+        run: sudo rm -rf /opt/hostedtoolcache /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup || true
+      - uses: actions/checkout@v7.0.1
+      - name: Configure toolchain
+        run: |
+          rustup toolchain install --profile minimal --no-self-update stable
+          rustup default stable
+      - uses: taiki-e/install-action@v2.86.1
+        with:
+          tool: just
+      - uses: Swatinem/rust-cache@v2
+      - run: just check-generated
+      - run: just check-api-deps
+
+  semver:
+    name: API compatibility
+    runs-on: ubuntu-latest
+    # The public API stays compatible unless a break is coordinated, and
+    # `.workhorse/specs/platform/api-compatibility.md` makes that mechanical: the
+    # published client generated after a change must not be a semver-breaking
+    # change against the one generated before.
+    #
+    # cargo-semver-checks reads the bump in the crate's manifest (stamped from the
+    # document's info.version) against what is on crates.io, so an uncoordinated
+    # break fails here, while a break whose major has been raised in the document
+    # passes — that raise being where the coordination is recorded.
+    steps:
+      - name: Free up space
+        run: sudo rm -rf /opt/hostedtoolcache /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup || true
+      - uses: actions/checkout@v7.0.1
+      - name: Configure toolchain
+        run: |
+          rustup toolchain install --profile minimal --no-self-update stable
+          rustup default stable
+      - uses: taiki-e/install-action@v2.86.1
+        with:
+          tool: cargo-semver-checks,just
+      - uses: Swatinem/rust-cache@v2
+      - run: just semver-checks
+
+  api-crate:
+    name: API client
+    runs-on: ubuntu-latest
+    # The published client is a cargo project of its own (see release-plz.toml), so
+    # the workspace jobs above do not build, lint, format-check or test it. Without
+    # this, the one crate with outside consumers is the one nothing checks.
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - name: Configure toolchain
+        run: |
+          rustup toolchain install --profile minimal --no-self-update stable --component clippy,rustfmt
+          rustup default stable
+      - uses: taiki-e/install-action@v2.86.1
+        with:
+          tool: just
+      - uses: Swatinem/rust-cache@v2
+      - run: just check-api-crate
+
   # Dummy job to have a stable name for PR requirements
   tests-pass:
     if: always() # always run even if dependencies fail
@@ -178,9 +244,11 @@ jobs:
       - clippy
       - fmt
       - e2e
+      - generated
+      - semver
+      - api-crate
     runs-on: ubuntu-latest
     steps:
       - uses: re-actors/alls-green@release/v1
         with:
           jobs: ${{ toJSON(needs) }}
-          allowed-skips: ${{ needs.plan.outputs.allowed-skips }}

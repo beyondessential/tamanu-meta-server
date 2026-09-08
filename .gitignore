@@ -1,11 +1,13 @@
 /target
+/crates/canopy-api/target
 Rocket.toml
 *.dump
 *.crt
 *.key
 identity.*.pem
 TODO.txt
-/.claude
+/.claude/*
+!/.claude/skills
 /private-web/node_modules
 /private-web/dist
 /private-web/test-results

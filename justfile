@@ -162,6 +162,66 @@ gen-openapi:
     cargo run --quiet --bin public-openapi-dump > crates/public-server/openapi.json
     cd private-web && npm run gen:api-types
 
+# Regenerate the published API client (crates/canopy-api) from the public
+# server's OpenAPI document. Run this after `gen-openapi` whenever the public
+# API changes; the generated source is committed alongside the document.
+gen-api:
+    cargo run --quiet --locked -p canopy-api-codegen
+    cargo metadata --manifest-path crates/canopy-api/Cargo.toml --format-version 1 > /dev/null
+
+# Check the published API client depends on no HTTP client: how a request
+# reaches canopy is its consumer's to decide, so the crate carries the wire
+# types and the call plumbing but no transport.
+check-api-deps:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    deps=$(cargo tree --manifest-path crates/canopy-api/Cargo.toml --edges normal --prefix none | awk '{print $1}' | sort -u)
+    for forbidden in reqwest hyper h2 rustls native-tls curl isahc ureq; do
+        if grep -qx "$forbidden" <<<"$deps"; then
+            echo "bes-canopy-api must not depend on $forbidden: the transport is the consumer's" >&2
+            exit 1
+        fi
+    done
+
+# Check the committed OpenAPI document and API client are what the current code
+# generates. CI runs this; a diff means `just gen-openapi && just gen-api`
+# wasn't run (or wasn't committed).
+check-generated:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    # --locked so what is generated depends only on committed inputs: an
+    # unlocked resolve could pick a newer codegen dependency than Cargo.lock
+    # records and emit different source here than it does on a dev machine.
+    generated=(crates/public-server/openapi.json private-web/openapi.json crates/canopy-api/src/generated.rs crates/canopy-api/Cargo.toml crates/canopy-api/Cargo.lock)
+    cargo run --quiet --locked --bin public-openapi-dump > crates/public-server/openapi.json
+    cargo run --quiet --locked --bin private-openapi-dump > private-web/openapi.json
+    cargo run --quiet --locked -p canopy-api-codegen
+    cargo metadata --manifest-path crates/canopy-api/Cargo.toml --format-version 1 > /dev/null
+    # Against HEAD rather than the index: a staged-but-uncommitted regeneration
+    # would otherwise make a stale commit look current.
+    if ! git diff --quiet HEAD -- "${generated[@]}"; then
+        echo "generated files are out of date; run 'just gen-openapi && just gen-api' and commit the result" >&2
+        git --no-pager diff --stat HEAD -- "${generated[@]}" >&2
+        exit 1
+    fi
+
+# Check the published API client is not a semver-breaking change against what is
+# on crates.io, which is how `.workhorse/specs/platform/api-compatibility.md`
+# defines a compatible change to the public API. The version in the crate's
+# manifest (stamped from the document's info.version) is what decides how much
+# change is permitted: cargo-semver-checks reads the bump against the published
+# baseline, so a coordinated break passes once info.version raises the major.
+semver-checks:
+    cargo semver-checks --manifest-path crates/canopy-api/Cargo.toml --package bes-canopy-api
+
+# Run the workspace's own checks over the published API client, which is a cargo
+# project of its own (see release-plz.toml) and so is invisible to every recipe
+# above: `cargo fmt`, `clippy`, `check` and `nextest` at the root do not reach it.
+check-api-crate:
+    cargo fmt --check --manifest-path crates/canopy-api/Cargo.toml
+    cargo clippy --manifest-path crates/canopy-api/Cargo.toml --all-features --all-targets -- -D warnings
+    cargo test --manifest-path crates/canopy-api/Cargo.toml
+
 # Clean build artifacts
 clean:
     cargo clean

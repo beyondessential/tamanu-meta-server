@@ -1,5 +1,8 @@
 name: CD
 
+# Every push to main deploys. There is no release gate: release-plz manages the
+# published API client and nothing else, so nothing here decides that a given
+# commit is a release. Gating this again is open work.
 on:
   push:
     branches: [main]
@@ -80,6 +83,8 @@ jobs:
 
       - uses: actions/checkout@v7.0.1
 
+      # The commit, because that is all a deployed image can honestly be named
+      # after while every push deploys.
       - id: tag
         run: echo "value=sha-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
 
@@ -124,6 +129,7 @@ jobs:
     name: Deploy
     runs-on: ubuntu-24.04
     needs: [build-image]
+    environment: release
     steps:
       - name: Checkout ops repo
         uses: actions/checkout@v7.0.1

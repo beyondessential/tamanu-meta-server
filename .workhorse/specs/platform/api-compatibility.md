@@ -12,8 +12,8 @@ Every change that is not coordinated is held to the definition below.
 
 ## The definition
 
-The `bestool-canopy` crate is generated from Canopy's public OpenAPI spec.
-A change to the public API is compatible when the crate generated from the spec after the change is not a semver-breaking change against the crate generated from the spec before it, as `cargo-semver-checks` judges it.
+Canopy publishes a Rust client generated from its public OpenAPI document (see [APIC](api-client-crate.md)).
+A change to the public API is compatible when the crate generated from the document after the change is not a semver-breaking change against the crate generated from it before, as `cargo-semver-checks` judges it.
 
 The definition is mechanical on purpose.
 "Keep the wire compatible" is a judgement each author makes differently; regenerating the crate and comparing it is a check that either passes or fails, so a break is found before it ships rather than reported from the field.
@@ -43,7 +43,8 @@ A client that disagrees with itself about what it is describing has not been und
 
 ## Surfaces the definition does not reach
 
-Values Canopy returns inside a map are not part of the schema, so removing a key a consumer reads breaks it without the definition noticing.
+The keys Canopy returns inside a map are not part of the schema, so removing a key a consumer reads breaks it without the definition noticing.
+A map's value type is generated into the client and judged with the rest of it, so the key set alone is what the definition leaves unreached.
 The reserved tags Canopy returns to a reporter are such a surface (see [STA](../public-server/statuses.md)).
 
 A key that has been served is kept and kept populated, on the same terms as a schema property, because a consumer reading it cannot tell a removed key from an absent value.

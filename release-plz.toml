@@ -1,0 +1,33 @@
+# release-plz manages the published API client, and nothing else.
+#
+# It used to run two tracks: `bes-canopy-api` and canopy itself, the latter tagged
+# rather than published. That never worked. release-plz's release command ignores
+# any package whose manifest says `publish = false`, whatever `git_only` says, so
+# the canopy crates were never tagged and the deploy that hung off those tags never
+# fired. Making them visible would mean making them packageable, which means a
+# version requirement on all 32 intra-workspace path dependencies and `cargo
+# package` building nine more crates on every release-PR run.
+#
+# So canopy is not release-plz's to release. cd.yml deploys every push to main,
+# tagging the image by commit, and canopy has no version series here. The crate
+# lives outside the workspace (see the root Cargo.toml) so this config sees one
+# publishable project rather than a workspace of private crates.
+
+[workspace]
+# Release only when a release PR is merged, so an ordinary merge to main publishes
+# nothing.
+release_always = false
+
+# Canopy's own tags share this repository, so the package name stays in the tag
+# rather than a bare version that would read as canopy's.
+git_tag_name = "{{ package }}-v{{ version }}"
+
+# The version is not release-plz's to invent: `.workhorse/specs/platform/api-client-crate.md`
+# has the OpenAPI document declare it and the crate take it, so `just gen-api`
+# stamps the manifest from the document, and release.yml propagates release-plz's
+# number back into `crates/public-server/src/openapi.rs`.
+[[package]]
+name = "bes-canopy-api"
+release = true
+changelog_update = true
+git_release_enable = true

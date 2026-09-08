@@ -1,0 +1,37 @@
+# Its own workspace: this crate is deliberately not a member of canopy's, so that
+# release-plz sees one publishable project rather than a workspace of private
+# crates it would decline to release. See the repository root's Cargo.toml.
+#
+# The versions below were inherited from canopy's workspace and are pinned here to
+# the same values; they are this crate's to keep in step now.
+[workspace]
+
+[package]
+publish = true
+name = "bes-canopy-api"
+version = "1.0.0"
+edition = "2024"
+resolver = "3"
+license = "GPL-3.0-or-later"
+description = "Raw client bindings for the BES Canopy API"
+repository = "https://github.com/beyondessential/canopy"
+authors = [
+	"Félix Saparelli <felix@passcod.name>",
+	"BES Developers <contact@bes.au>",
+]
+
+[dependencies]
+async-trait = "0.1.89"
+bon = "3.9.3"
+bytes = "1.12.1"
+flate2 = "1.0.34"
+http = "1.4.0"
+jiff = { version = "0.2.24", features = ["serde"] }
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.150"
+thiserror = "2.0.19"
+uuid = { version = "1.23.1", features = ["serde"] }
+
+[dev-dependencies]
+serde_json = "1.0.150"
+tokio = { version = "1.52.3", features = ["macros", "rt"] }

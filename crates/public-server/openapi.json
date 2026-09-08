@@ -10,7 +10,7 @@
     "license": {
       "name": "GPL-3.0-or-later"
     },
-    "version": ""
+    "version": "1.0.0"
   },
   "paths": {
     "/applications": {
@@ -2014,6 +2014,7 @@
           },
           "Expiration": {
             "type": "string",
+            "format": "date-time",
             "description": "When the credentials expire, as an RFC 3339 / ISO 8601 UTC instant.\nCredentials last at most one hour; request a fresh set per run."
           },
           "SecretAccessKey": {

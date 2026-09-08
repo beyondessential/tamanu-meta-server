@@ -1,6 +1,7 @@
 [workspace]
 resolver = "3"
 members = [
+	"crates/canopy-api-codegen",
 	"crates/canopy-mcp",
 	"crates/commons-errors",
 	"crates/commons-servers",
@@ -12,6 +13,14 @@ members = [
 	"crates/public-server",
 	"vendor/canopy-utoipa-axum",
 ]
+
+# `bes-canopy-api` is a cargo project of its own, not a member here. release-plz's
+# release command silently ignores any package whose manifest says
+# `publish = false`, and every crate in this workspace is private, so a release-plz
+# pointed at this workspace declines to release the one crate that is published.
+# It depends on nothing here, so keeping it separate costs nothing and keeps that
+# failure mode out of reach. See release-plz.toml.
+exclude = ["crates/canopy-api"]
 
 [workspace.dependencies]
 anyhow = "1"
