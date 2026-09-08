@@ -14,6 +14,7 @@ use std::{
 	sync::{Arc, Mutex},
 };
 
+use age::secrecy::{ExposeSecret, SecretString};
 use commons_errors::{AppError, Result};
 
 /// Env var that forces the in-memory secret store (no cluster needed). Set by the
@@ -191,7 +192,25 @@ impl BackupSecrets {
 	/// Read all string keys of the named Secret — for the rotation dual-key state
 	/// machine (`password` + `password_next`). Missing Secret → Err; absent keys
 	/// are simply not in the map.
+	///
+	/// The values arrive as plain `String`s and are not zeroed on drop. Prefer
+	/// [`Self::try_read_secret_keys`] for anything holding one past the call.
 	pub async fn read_keys(&self, secret_name: &str) -> Result<BTreeMap<String, String>> {
+		Ok(self
+			.read_secret_keys(secret_name)
+			.await?
+			.into_iter()
+			.map(|(k, v)| (k, v.expose_secret().to_owned()))
+			.collect())
+	}
+
+	/// Read all string keys of the named Secret, each value held in a
+	/// [`SecretString`] so it is zeroed when the caller drops it. Missing
+	/// Secret → Err.
+	pub async fn read_secret_keys(
+		&self,
+		secret_name: &str,
+	) -> Result<BTreeMap<String, SecretString>> {
 		match self {
 			Self::Kube { client, namespace } => {
 				use k8s_openapi::api::core::v1::Secret;
@@ -207,7 +226,7 @@ impl BackupSecrets {
 					let s = String::from_utf8(v.0).map_err(|_| {
 						AppError::Upstream(format!("secret {secret_name} key {k} not utf-8"))
 					})?;
-					out.insert(k, s);
+					out.insert(k, SecretString::from(s));
 				}
 				Ok(out)
 			}
@@ -215,7 +234,7 @@ impl BackupSecrets {
 				.lock()
 				.unwrap()
 				.get(secret_name)
-				.cloned()
+				.map(as_secrets)
 				.ok_or_else(|| AppError::Upstream(format!("secret get failed: {secret_name}"))),
 		}
 	}
@@ -224,17 +243,32 @@ impl BackupSecrets {
 	/// A caller that reads-modifies-writes needs an absent Secret told apart
 	/// from an API failure: treating a failure as empty would have the write
 	/// back drop every key already there.
+	///
+	/// The values arrive as plain `String`s; see [`Self::read_keys`].
 	pub async fn try_read_keys(
 		&self,
 		secret_name: &str,
 	) -> Result<Option<BTreeMap<String, String>>> {
+		Ok(self.try_read_secret_keys(secret_name).await?.map(|keys| {
+			keys.into_iter()
+				.map(|(k, v)| (k, v.expose_secret().to_owned()))
+				.collect()
+		}))
+	}
+
+	/// [`Self::read_secret_keys`], answering `None` for a Secret that does not
+	/// exist rather than an error.
+	pub async fn try_read_secret_keys(
+		&self,
+		secret_name: &str,
+	) -> Result<Option<BTreeMap<String, SecretString>>> {
 		match self {
-			Self::Kube { .. } => match self.read_keys(secret_name).await {
+			Self::Kube { .. } => match self.read_secret_keys(secret_name).await {
 				Ok(keys) => Ok(Some(keys)),
 				Err(_) if !self.exists(secret_name).await? => Ok(None),
 				Err(err) => Err(err),
 			},
-			Self::Memory(store) => Ok(store.lock().unwrap().get(secret_name).cloned()),
+			Self::Memory(store) => Ok(store.lock().unwrap().get(secret_name).map(as_secrets)),
 		}
 	}
 
@@ -259,6 +293,8 @@ impl BackupSecrets {
 	/// apply with force). Keys this manager owns but that are omitted from `keys`
 	/// are removed — so a rotation "promote" that writes only `{password}` cleans
 	/// up the leftover `password_next`. Used by the rotation dual-key dance.
+	///
+	/// The values are plain `String`s; see [`Self::put_secret_keys`].
 	pub async fn put_keys(&self, secret_name: &str, keys: &BTreeMap<String, String>) -> Result<()> {
 		match self {
 			Self::Kube { client, namespace } => {
@@ -296,6 +332,27 @@ impl BackupSecrets {
 			}
 		}
 	}
+
+	/// [`Self::put_keys`] taking [`SecretString`] values, so a caller holding
+	/// secret material never has to keep a plain `String` of it. The values are
+	/// exposed once here, into the request body kubernetes requires.
+	pub async fn put_secret_keys(
+		&self,
+		secret_name: &str,
+		keys: &BTreeMap<String, SecretString>,
+	) -> Result<()> {
+		let plain: BTreeMap<String, String> = keys
+			.iter()
+			.map(|(k, v)| (k.clone(), v.expose_secret().to_owned()))
+			.collect();
+		self.put_keys(secret_name, &plain).await
+	}
+}
+
+fn as_secrets(keys: &BTreeMap<String, String>) -> BTreeMap<String, SecretString> {
+	keys.iter()
+		.map(|(k, v)| (k.clone(), SecretString::from(v.clone())))
+		.collect()
 }
 
 /// Build a `Secret` carrying `value` under `key` named `secret_name`.
