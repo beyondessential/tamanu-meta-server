@@ -2,18 +2,34 @@ use std::collections::BTreeMap;
 use std::str::FromStr;
 
 use axum::Json;
-use axum::extract::State;
+use axum::extract::{DefaultBodyLimit, State};
+use base64::{Engine as _, prelude::BASE64_STANDARD};
 use canopy_utoipa_axum::{router::OpenApiRouter, routes};
 use commons_errors::{AppError, ProblemDetailsSchema, Result};
 use commons_servers::tailscale_auth::{TailscaleAdmin, TailscaleUser};
 use commons_types::version::{VersionStatus, VersionStr};
-use database::{artifacts::Artifact, version_known_issues::VersionKnownIssue, versions::Version};
+use database::{
+	artifacts::{Artifact, NewArtifact, Scope, digest_of},
+	server_groups::ServerGroup,
+	version_known_issues::VersionKnownIssue,
+	versions::Version,
+};
 use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use uuid::Uuid;
 
 use crate::state::AppState;
+
+/// Cap on the bytes Canopy will hold for one artifact. A reporting schema is a
+/// SQL file; anything approaching this is not one, and the rows live in
+/// Postgres alongside everything else.
+const MAX_HELD_ARTIFACT_BYTES: usize = 32 * 1024 * 1024;
+
+/// Body budget for `create_artifact`. Base64 inflates the bytes by a third, and
+/// sizing above that keeps an over-limit upload the handler's structured
+/// refusal rather than axum's plain-text 413.
+const MAX_CREATE_ARTIFACT_BODY_BYTES: usize = MAX_HELD_ARTIFACT_BYTES / 3 * 4 + 64 * 1024;
 
 /// A single released (or draft) software version.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
@@ -177,8 +193,17 @@ pub struct ArtifactData {
 	pub artifact_type: String,
 	/// Target platform this artifact is built for.
 	pub platform: String,
-	/// URL clients use to download this artifact.
-	pub download_url: String,
+	/// URL clients use to download this artifact. `null` when Canopy holds
+	/// the bytes itself.
+	pub download_url: Option<String>,
+	/// The group this artifact is for, when it is for one alone.
+	pub group_id: Option<Uuid>,
+	/// Name of that group, for display.
+	pub group_name: Option<String>,
+	/// Algorithm-prefixed digest recorded for the artifact, where there is one.
+	pub digest: Option<String>,
+	/// `true` when Canopy holds this artifact's bytes rather than a location.
+	pub canopy_holds_bytes: bool,
 	/// `true` when this artifact is tied to the exact version being
 	/// queried; `false` when it was matched via a version range pattern
 	/// instead.
@@ -204,7 +229,11 @@ pub fn routes() -> OpenApiRouter<AppState> {
 		.routes(routes!(update_version_status))
 		.routes(routes!(update_version_changelog))
 		.routes(routes!(update_artifact))
-		.routes(routes!(create_artifact))
+		.merge(
+			OpenApiRouter::new()
+				.routes(routes!(create_artifact))
+				.layer(DefaultBodyLimit::max(MAX_CREATE_ARTIFACT_BODY_BYTES)),
+		)
 		.routes(routes!(delete_artifact))
 		.routes(routes!(list_known_issues))
 		.routes(routes!(add_known_issue))
@@ -415,6 +444,7 @@ pub async fn get_version_detail(
 	post,
 	path = "/get_version_artifacts",
 	tag = "versions",
+	security(("tailscale-user" = [])),
 	request_body = VersionStringArgs,
 	responses(
 		(status = 200, body = Vec<ArtifactData>),
@@ -423,30 +453,49 @@ pub async fn get_version_detail(
 )]
 pub async fn get_version_artifacts(
 	State(state): State<AppState>,
+	// Every group's artifacts, digests and group names, which ART discloses to
+	// an operator and to nobody else. The tagged-device layer above only turns
+	// away a caller that both carries no identity and comes from the tailnet.
+	// spec: ART#who-is-offered-a-group-scoped-artifact, ADM
+	_user: TailscaleUser,
 	Json(args): Json<VersionStringArgs>,
 ) -> Result<Json<Vec<ArtifactData>>> {
 	let mut conn = state.db_read.get().await?;
 	let version = VersionStr::from_str(&args.version)?;
 	let version_record = Version::get_by_version(&mut conn, version).await?;
+	Ok(Json(artifacts_of(&mut conn, version_record.id).await?))
+}
+
+/// Every artifact of a version as an operator sees it: the full set, including
+/// what specificity passed over and every group's, because what resolution
+/// hides is a fact about how a version was published.
+// spec: ART#what-a-version-offers
+async fn artifacts_of(
+	conn: &mut database::diesel_async::AsyncPgConnection,
+	version_id: Uuid,
+) -> Result<Vec<ArtifactData>> {
 	let artifacts_with_metadata =
-		Artifact::get_for_version_with_metadata(&mut conn, version_record.id).await?;
-	Ok(Json(
-		artifacts_with_metadata
-			.into_iter()
-			.map(
-				|(a, is_exact, has_range_override, is_used_in_public_api)| ArtifactData {
-					id: a.id,
-					artifact_type: a.artifact_type,
-					platform: a.platform,
-					download_url: a.download_url,
-					is_exact,
-					version_range_pattern: a.version_range_pattern,
-					has_range_override,
-					is_used_in_public_api,
-				},
-			)
-			.collect(),
-	))
+		Artifact::get_for_version_all_matches_with_metadata(conn, version_id, Scope::Fleet).await?;
+	let group_names = ServerGroup::names_by_id(conn).await?;
+	Ok(artifacts_with_metadata
+		.into_iter()
+		.map(
+			|(a, is_exact, has_range_override, is_used_in_public_api)| ArtifactData {
+				id: a.id,
+				artifact_type: a.artifact_type,
+				platform: a.platform,
+				canopy_holds_bytes: a.download_url.is_none(),
+				download_url: a.download_url,
+				group_name: a.group_id.and_then(|g| group_names.get(&g).cloned()),
+				group_id: a.group_id,
+				digest: a.digest,
+				is_exact,
+				version_range_pattern: a.version_range_pattern,
+				has_range_override,
+				is_used_in_public_api,
+			},
+		)
+		.collect())
 }
 
 /// Identifies a version and the publication status to set on it.
@@ -545,8 +594,8 @@ pub struct UpdateArtifactArgs {
 	pub artifact_type: String,
 	/// New target platform.
 	pub platform: String,
-	/// New download URL.
-	pub download_url: String,
+	/// New download URL. Leave unset for an artifact whose bytes Canopy holds.
+	pub download_url: Option<String>,
 }
 
 /// Update an existing artifact's type, platform, and download URL.
@@ -589,8 +638,19 @@ pub struct CreateArtifactArgs {
 	pub artifact_type: String,
 	/// Target platform.
 	pub platform: String,
-	/// Download URL for the artifact.
-	pub download_url: String,
+	/// Download URL, for an artifact Canopy records a location for.
+	pub download_url: Option<String>,
+	/// The group this artifact is for. Naming one makes Canopy hold the bytes.
+	pub group_id: Option<Uuid>,
+	/// The artifact's bytes, base64-encoded. Required when a group is named.
+	pub content_base64: Option<String>,
+	/// Media type of those bytes.
+	pub content_type: Option<String>,
+	/// Algorithm-prefixed digest of those bytes, e.g. `sha256:2cf24dba…`.
+	/// Required when a group is named: Canopy checks the bytes against it as
+	/// they arrive and refuses the registration on a mismatch, so a corrupted
+	/// upload is refused while whoever sent it is still there to send it again.
+	pub digest: Option<String>,
 }
 
 /// Create a new artifact tied to an exact version.
@@ -613,24 +673,99 @@ pub async fn create_artifact(
 	Json(args): Json<CreateArtifactArgs>,
 ) -> Result<Json<ArtifactData>> {
 	let mut conn = state.db.get().await?;
-	let artifact = Artifact::create(
+
+	// An artifact is either for a group, in which case Canopy holds its bytes,
+	// or for every group, in which case Canopy records where it rests.
+	// spec: ART#where-an-artifact-rests
+	let (content, digest) = match (&args.group_id, &args.content_base64) {
+		(Some(_), Some(encoded)) => {
+			let bytes = BASE64_STANDARD
+				.decode(encoded)
+				.map_err(|_| AppError::BadRequest("content_base64 is not valid base64".into()))?;
+			if bytes.len() > MAX_HELD_ARTIFACT_BYTES {
+				return Err(AppError::BadRequest(format!(
+					"artifact is larger than the {} MiB limit",
+					MAX_HELD_ARTIFACT_BYTES / (1024 * 1024)
+				)));
+			}
+			let Some(claimed) = args
+				.digest
+				.as_deref()
+				.map(str::trim)
+				.filter(|d| !d.is_empty())
+			else {
+				return Err(AppError::BadRequest(
+					"a group-scoped artifact must carry the digest of its bytes".into(),
+				));
+			};
+			// spec: ART#digests
+			let digest = digest_of(&bytes);
+			if claimed != digest {
+				return Err(AppError::BadRequest(format!(
+					"the bytes are {digest}, not the {claimed} the registration names"
+				)));
+			}
+			(Some(bytes), Some(digest))
+		}
+		(Some(_), None) => {
+			return Err(AppError::BadRequest(
+				"a group-scoped artifact must carry its bytes".into(),
+			));
+		}
+		(None, Some(_)) => {
+			return Err(AppError::BadRequest(
+				"only a group-scoped artifact carries bytes".into(),
+			));
+		}
+		(None, None) => (None, None),
+	};
+
+	// A blank URL is no location at all, and the constraint only tests for NULL.
+	let download_url = args.download_url.filter(|url| !url.trim().is_empty());
+
+	// An artifact rests in one place or the other, so a registration naming a
+	// group and a location together is refused rather than written and caught
+	// by the constraint.
+	// spec: ART#where-an-artifact-rests
+	if args.group_id.is_some() && download_url.is_some() {
+		return Err(AppError::BadRequest(
+			"an artifact Canopy holds has no download URL".into(),
+		));
+	}
+
+	if args.group_id.is_none() && download_url.is_none() {
+		return Err(AppError::BadRequest(
+			"an artifact needs a download URL or a group".into(),
+		));
+	}
+
+	let artifact = Artifact::register(
 		&mut conn,
-		args.version_id,
-		args.artifact_type,
-		args.platform,
-		args.download_url,
+		NewArtifact {
+			version_id: Some(args.version_id),
+			artifact_type: args.artifact_type,
+			platform: args.platform,
+			download_url,
+			device_id: None,
+			version_range_pattern: None,
+			group_id: args.group_id,
+			content,
+			content_type: args.content_type,
+			digest,
+			run_id: None,
+		},
 	)
 	.await?;
-	Ok(Json(ArtifactData {
-		id: artifact.id,
-		artifact_type: artifact.artifact_type,
-		platform: artifact.platform,
-		download_url: artifact.download_url,
-		is_exact: true,
-		version_range_pattern: None,
-		has_range_override: false,
-		is_used_in_public_api: true,
-	}))
+
+	// Read back through the listing rather than describing the row a second
+	// time here: whether it overrides a range and whether it is the one served
+	// follow from the version's other artifacts, not from this registration.
+	artifacts_of(&mut conn, args.version_id)
+		.await?
+		.into_iter()
+		.find(|a| a.id == artifact.id)
+		.map(Json)
+		.ok_or_else(|| AppError::custom("the artifact just registered is not listed"))
 }
 
 /// Identifies a single artifact by id.

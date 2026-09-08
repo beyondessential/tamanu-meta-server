@@ -38,6 +38,10 @@ It is offered one artifact per type and platform, and where the bytes rest is no
 
 ## What a version offers
 
+A read names an exact version or a range.
+An exact version is answered for itself, since a caller naming one is saying what it runs rather than asking where to go, and what is published for the version a caller is on does not depend on whether that version is one to move to.
+A range is answered for the latest published version it covers that no known issue covers, since a range is a question about where to go and a version Canopy has vouched against is not an answer to it.
+
 Canopy offers a caller one artifact per type and platform, chosen from the artifacts that caller may see: those belonging to no group, and those scoped to the caller's group where that group is known.
 Where several match, the most specific is offered.
 An artifact scoped to the caller's group is more specific than one belonging to no group.
