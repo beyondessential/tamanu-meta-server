@@ -39,8 +39,28 @@ updates:
           - patch
           - minor
 
+  # Two cargo projects: this workspace, and the published API client, which is not
+  # a member of it (see release-plz.toml). A single entry would leave the crate
+  # consumers actually depend on without updates.
   - package-ecosystem: cargo
     directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: deps
+    cooldown:
+      default-days: 7
+      semver-major-days: 14
+    groups:
+      deps-patches:
+        patterns:
+          - "*"
+        update-types:
+          - patch
+          - minor
+
+  - package-ecosystem: cargo
+    directory: /crates/canopy-api
     schedule:
       interval: weekly
     commit-message:
