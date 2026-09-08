@@ -9,6 +9,7 @@ type Pair = {
 	state: "awaiting" | "built" | "failed";
 	error?: string | null;
 	requested: boolean;
+	applications: string[];
 };
 
 const GROUP = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
@@ -21,6 +22,7 @@ function pair(over: Partial<Pair> = {}): Pair {
 		state: "awaiting",
 		error: null,
 		requested: false,
+		applications: ["kamaka-central"],
 		...over,
 	};
 }
@@ -83,6 +85,30 @@ describe("a pair's state reads off the chip", () => {
 
 		fireEvent.mouseOver(await screen.findByText("Failed"));
 		expect(await screen.findByText("the build failed")).toBeTruthy();
+	});
+});
+
+describe("which servers a pair covers", () => {
+	it("counts them on the row and names them behind it", async () => {
+		stubApi([
+			pair({
+				applications: ["kamaka-central", "kamaka-clinic-north"],
+			}),
+		]);
+		render(<ReportingSchemasSection groupId={GROUP} />);
+
+		fireEvent.mouseOver(await screen.findByText("2 servers"));
+		expect(
+			await screen.findByText("kamaka-central, kamaka-clinic-north"),
+		).toBeTruthy();
+	});
+
+	it("says where a pair comes from the plan rather than from a server", async () => {
+		stubApi([pair({ applications: [] })]);
+		render(<ReportingSchemasSection groupId={GROUP} />);
+
+		expect(await screen.findByText("upgrade plan")).toBeTruthy();
+		expect(screen.queryByText("0 servers")).toBeNull();
 	});
 });
 
