@@ -58,13 +58,15 @@ pub enum VariableScope {
 
 impl VariableScope {
 	/// The Secret this scope's secret values live under.
+	///
+	/// A kubernetes name is held to a DNS label, so the prefix stays short
+	/// enough that the longest of these (an environment at rank `production`)
+	/// fits inside 63 characters alongside a uuid.
 	pub fn secret_name(self) -> String {
 		match self {
-			Self::Group { group_id } => format!("inventory-vars-group-{group_id}"),
-			Self::Environment { group_id, rank } => {
-				format!("inventory-vars-env-{group_id}-{rank}")
-			}
-			Self::Machine { machine_id } => format!("inventory-vars-machine-{machine_id}"),
+			Self::Group { group_id } => format!("inv-vars-g-{group_id}"),
+			Self::Environment { group_id, rank } => format!("inv-vars-{rank}-{group_id}"),
+			Self::Machine { machine_id } => format!("inv-vars-m-{machine_id}"),
 		}
 	}
 }

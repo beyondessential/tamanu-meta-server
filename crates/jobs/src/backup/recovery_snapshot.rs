@@ -372,7 +372,7 @@ mod tests {
 			.unwrap();
 
 			let secrets = BackupSecrets::memory();
-			let secret = format!("inventory-vars-env-{group_id}-production");
+			let secret = format!("inv-vars-production-{group_id}");
 			secrets
 				.put_keys(
 					&secret,
