@@ -5434,7 +5434,7 @@
             }
           },
           "409": {
-            "description": "The lease is someone else's, no longer holds, or the environment is gone",
+            "description": "The lease is someone else's, no longer holds, the environment is gone, or two machines share an address",
             "content": {
               "application/json": {
                 "schema": {
@@ -5766,7 +5766,7 @@
             }
           },
           "400": {
-            "description": "Not a usable variable name",
+            "description": "Not a usable variable name, or `ansible_host` outside machine scope",
             "content": {
               "application/json": {
                 "schema": {

@@ -882,3 +882,97 @@ async fn takes_an_unplanned_upgrade_at_another_rank() {
 	})
 	.await
 }
+
+/// An operator whose lease was taken over is walking into work somebody else
+/// has started, which the refusal has to say rather than reading as an expiry.
+#[tokio::test(flavor = "multi_thread")]
+async fn says_who_took_a_lease_over_rather_than_calling_it_expired() {
+	commons_tests::server::run(async move |mut conn, _public, private| {
+		let group = insert_group(&mut conn, "kamaka").await;
+		insert_application(&mut conn, group, "kamaka-central", "tamanu-central", None).await;
+		let mine = take_lease(&private, json!({ "server_group_id": group })).await;
+		conn.batch_execute(&format!(
+			"UPDATE inventory_leases SET released_at = NOW(), released_by = 'someone.else@bes.au'
+			 WHERE id = '{mine}'"
+		))
+		.await
+		.expect("take the lease over");
+
+		let response = private
+			.post("/api/inventory/for_group")
+			.json(&json!({ "lease_id": mine }))
+			.await;
+		response.assert_status(axum::http::StatusCode::CONFLICT);
+		let detail = response.json::<Value>()["detail"]
+			.as_str()
+			.expect("detail")
+			.to_owned();
+		assert!(
+			detail.contains("taken over by someone.else@bes.au"),
+			"{detail}"
+		);
+	})
+	.await
+}
+
+/// Canopy's own nil application is not a machine a run configures.
+#[tokio::test(flavor = "multi_thread")]
+async fn leaves_out_the_meta_application() {
+	commons_tests::server::run(async move |mut conn, _public, private| {
+		let group = insert_group(&mut conn, "kamaka").await;
+		insert_application(&mut conn, group, "kamaka-central", "tamanu-central", None).await;
+		conn.batch_execute(&format!(
+			"UPDATE machines SET group_id = '{group}'
+			 WHERE id = '00000000-0000-0000-0000-000000000000';
+			 UPDATE applications SET group_id = '{group}'
+			 WHERE id = '00000000-0000-0000-0000-000000000000'"
+		))
+		.await
+		.expect("put the meta application in the group");
+
+		let body = read_inventory(&private, json!({ "server_group_id": group })).await;
+		let hosts = body["hosts"].as_array().expect("hosts");
+		assert_eq!(hosts.len(), 1);
+		assert_eq!(hosts[0]["name"], "kamaka-central");
+	})
+	.await
+}
+
+/// Canopy holding no address is served as none rather than as a guess, which
+/// is what a variable has to supply.
+#[tokio::test(flavor = "multi_thread")]
+async fn serves_no_address_where_canopy_holds_none() {
+	commons_tests::server::run(async move |mut conn, _public, private| {
+		let group = insert_group(&mut conn, "kamaka").await;
+		insert_application(&mut conn, group, "kamaka-central", "tamanu-central", None).await;
+
+		let body = read_inventory(&private, json!({ "server_group_id": group })).await;
+		assert_eq!(body["hosts"][0]["address"], Value::Null);
+	})
+	.await
+}
+
+/// Extending is the holder's, so a lease cannot be kept alive by whoever is
+/// waiting for it.
+#[tokio::test(flavor = "multi_thread")]
+async fn refuses_to_extend_a_lease_someone_else_holds() {
+	commons_tests::server::run(async move |mut conn, _public, private| {
+		let group = insert_group(&mut conn, "kamaka").await;
+		insert_application(&mut conn, group, "kamaka-central", "tamanu-central", None).await;
+		let lease = Uuid::new_v4();
+		conn.batch_execute(&format!(
+			"INSERT INTO inventory_leases (id, server_group_id, rank, intent, held_by, expires_at)
+			 VALUES ('{lease}', '{group}', 'dev', 'configure', 'someone.else@bes.au',
+			         NOW() + INTERVAL '20 minutes')"
+		))
+		.await
+		.expect("seed a lease");
+
+		private
+			.post("/api/inventory/extend_lease")
+			.json(&json!({ "lease_id": lease }))
+			.await
+			.assert_status(axum::http::StatusCode::CONFLICT);
+	})
+	.await
+}

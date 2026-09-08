@@ -32,12 +32,16 @@ A secret's value is held in Canopy's secret store (see [BKO](backup.md)) rather 
 Only an administrator can read, set, or replace the value of a secret variable, or remove one.
 Non-admins can list secret variables by name only.
 Variables must expose whether they are secret over the API; consumers should avoid caching or displaying them if so.
-Variables are backed up in the escrow store (see [BKJ](../jobs/backup.md)) to survive the loss of the secret store.
+Variables are backed up in the escrow store (see [ESC](../jobs/escrow.md)) to survive the loss of the secret store.
 
 ## Reaching a machine
 
 A machine's address is the tailnet name of the device bound to it, or the recorded host of an application on it where no device is bound.
-An `ansible_host` variable overrides that, and the account a run connects as is the `ansible_user` variable.
+An `ansible_host` variable overrides that.
+It names one machine, so it is set at machine scope alone: set wider it would give every machine in the environment one address.
+An environment serving two machines the same address is refused, since a run would otherwise configure one box twice and leave the other untouched.
+
+The account a run connects as is the `ansible_user` variable, which is set at any scope.
 
 ## Run leases
 

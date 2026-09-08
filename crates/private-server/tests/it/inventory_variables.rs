@@ -9,8 +9,8 @@ use serde_json::{Value, json};
 use uuid::Uuid;
 
 use crate::inventory::{
-	insert_application, insert_application_on_its_own_machine, insert_group, read_inventory,
-	take_lease,
+	insert_application, insert_application_on_its_own_machine, insert_group,
+	insert_ranked_application, read_inventory, take_lease,
 };
 
 async fn set_var(
@@ -421,6 +421,243 @@ async fn refuses_a_name_the_secret_store_cannot_key_a_value_under() {
 			}))
 			.await
 			.assert_status(axum::http::StatusCode::BAD_REQUEST);
+	})
+	.await
+}
+
+/// A group's value reaches every one of its environments, which is the cascade
+/// a per-environment table would throw away.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_groups_value_reaches_every_environment_in_it() {
+	commons_tests::server::run(async move |mut conn, _public, private| {
+		let group = insert_group(&mut conn, "kamaka").await;
+		insert_ranked_application(
+			&mut conn,
+			group,
+			"kamaka-central",
+			"tamanu-central",
+			Some("production"),
+			None,
+		)
+		.await;
+		insert_ranked_application(
+			&mut conn,
+			group,
+			"kamaka-demo",
+			"tamanu-central",
+			Some("demo"),
+			None,
+		)
+		.await;
+		set_var(
+			&private,
+			json!({ "server_group_id": group }),
+			"timezone",
+			json!("Pacific/Fiji"),
+			false,
+		)
+		.await;
+
+		for rank in ["production", "demo"] {
+			let body =
+				read_inventory(&private, json!({ "server_group_id": group, "rank": rank })).await;
+			assert_eq!(body["vars"]["timezone"], "Pacific/Fiji", "{rank}");
+			assert_eq!(
+				body["hosts"][0]["vars"]["timezone"], "Pacific/Fiji",
+				"{rank}"
+			);
+		}
+	})
+	.await
+}
+
+/// Turning a secret into a plain variable forgets the stored value, so a name
+/// that comes back as a secret cannot resurrect the one it used to hold.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_secret_turned_plain_forgets_the_value_it_held() {
+	commons_tests::server::run(async move |mut conn, _public, private| {
+		let group = insert_group(&mut conn, "kamaka").await;
+		insert_application(&mut conn, group, "kamaka-central", "tamanu-central", None).await;
+		let scope = json!({ "server_group_id": group, "rank": "dev" });
+
+		set_var(&private, scope.clone(), "salt", json!("pepper"), true).await;
+		set_var(&private, scope.clone(), "salt", json!("visible"), false).await;
+
+		let body = read_inventory(&private, json!({ "server_group_id": group })).await;
+		assert_eq!(body["vars"]["salt"], "visible");
+		assert_eq!(body["secret_vars"], json!([]));
+
+		// The name coming back as a secret finds nothing behind it, which
+		// refuses the read rather than serving what it held before.
+		let mut args = scope;
+		args["name"] = json!("salt");
+		private
+			.post("/api/inventory_variables/remove")
+			.json(&args)
+			.await
+			.assert_status_ok();
+		secret_without_value(&mut conn, group, "dev", "salt").await;
+
+		let lease = take_lease(&private, json!({ "server_group_id": group })).await;
+		let response = private
+			.post("/api/inventory/for_group")
+			.json(&json!({ "lease_id": lease }))
+			.await;
+		response.assert_status(axum::http::StatusCode::BAD_GATEWAY);
+		assert!(
+			response.json::<Value>()["detail"]
+				.as_str()
+				.expect("detail")
+				.contains("salt"),
+		);
+	})
+	.await
+}
+
+/// A machine's variables are its own, and reach no other box in the
+/// environment.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_machines_value_reaches_only_that_machine() {
+	commons_tests::server::run(async move |mut conn, _public, private| {
+		let group = insert_group(&mut conn, "kamaka").await;
+		let (_, central) = insert_application_on_its_own_machine(
+			&mut conn,
+			group,
+			"kamaka-central",
+			"tamanu-central",
+			None,
+			None,
+		)
+		.await;
+		let (_, facility) = insert_application_on_its_own_machine(
+			&mut conn,
+			group,
+			"kamaka-facility",
+			"tamanu-facility",
+			None,
+			None,
+		)
+		.await;
+		set_var(
+			&private,
+			json!({ "machine_id": central }),
+			"tamanu_facility_id",
+			json!("kamaka-central"),
+			false,
+		)
+		.await;
+
+		let body = read_inventory(&private, json!({ "server_group_id": group })).await;
+		let hosts = body["hosts"].as_array().expect("hosts");
+		let mine = hosts
+			.iter()
+			.find(|host| host["id"] == central.to_string())
+			.expect("central's machine");
+		let theirs = hosts
+			.iter()
+			.find(|host| host["id"] == facility.to_string())
+			.expect("facility's machine");
+		assert_eq!(mine["vars"]["tamanu_facility_id"], "kamaka-central");
+		assert!(theirs["vars"].get("tamanu_facility_id").is_none());
+		assert!(body["vars"].get("tamanu_facility_id").is_none());
+	})
+	.await
+}
+
+/// `ansible_host` at a wider scope would give every machine in the environment
+/// one address, so it is set on a machine.
+#[tokio::test(flavor = "multi_thread")]
+async fn refuses_ansible_host_outside_machine_scope() {
+	commons_tests::server::run(async move |mut conn, _public, private| {
+		let group = insert_group(&mut conn, "kamaka").await;
+		insert_application(&mut conn, group, "kamaka-central", "tamanu-central", None).await;
+
+		for scope in [
+			json!({ "server_group_id": group }),
+			json!({ "server_group_id": group, "rank": "dev" }),
+		] {
+			let mut args = scope;
+			args["name"] = json!("ansible_host");
+			args["value"] = json!("10.0.0.4");
+			let response = private
+				.post("/api/inventory_variables/set")
+				.json(&args)
+				.await;
+			response.assert_status(axum::http::StatusCode::BAD_REQUEST);
+			assert!(
+				response.json::<Value>()["detail"]
+					.as_str()
+					.expect("detail")
+					.contains("rather than on a group or an environment"),
+			);
+		}
+
+		// `ansible_user` is not so restricted: an environment's machines share
+		// the account a run connects as.
+		set_var(
+			&private,
+			json!({ "server_group_id": group }),
+			"ansible_user",
+			json!("ubuntu"),
+			false,
+		)
+		.await;
+	})
+	.await
+}
+
+/// A run receiving two machines at one address would configure one box twice
+/// and leave the other untouched.
+#[tokio::test(flavor = "multi_thread")]
+async fn refuses_an_environment_whose_machines_share_an_address() {
+	commons_tests::server::run(async move |mut conn, _public, private| {
+		let group = insert_group(&mut conn, "kamaka").await;
+		let (_, central) = insert_application_on_its_own_machine(
+			&mut conn,
+			group,
+			"kamaka-central",
+			"tamanu-central",
+			None,
+			Some("https://shared.kamaka.example/"),
+		)
+		.await;
+		insert_application_on_its_own_machine(
+			&mut conn,
+			group,
+			"kamaka-facility",
+			"tamanu-facility",
+			None,
+			Some("https://shared.kamaka.example/"),
+		)
+		.await;
+
+		let lease = take_lease(&private, json!({ "server_group_id": group })).await;
+		let response = private
+			.post("/api/inventory/for_group")
+			.json(&json!({ "lease_id": lease }))
+			.await;
+		response.assert_status(axum::http::StatusCode::CONFLICT);
+		assert!(
+			response.json::<Value>()["detail"]
+				.as_str()
+				.expect("detail")
+				.contains("both reached at"),
+		);
+
+		// Naming one box explicitly is what resolves it.
+		set_var(
+			&private,
+			json!({ "machine_id": central }),
+			"ansible_host",
+			json!("central.kamaka.example"),
+			false,
+		)
+		.await;
+		private
+			.post("/api/inventory/for_group")
+			.json(&json!({ "lease_id": lease }))
+			.await
+			.assert_status_ok();
 	})
 	.await
 }

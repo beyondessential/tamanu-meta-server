@@ -4,6 +4,7 @@
 //! part of an inventory (see [`super::inventory`]). Nothing here returns one.
 // spec: INV#inventory-variables
 
+use algae_cli::passphrases::SecretString;
 use axum::{Json, extract::State};
 use canopy_utoipa_axum::{router::OpenApiRouter, routes};
 use commons_errors::{AppError, ProblemDetailsSchema, Result};
@@ -147,7 +148,7 @@ pub async fn for_group(
 	request_body = SetArgs,
 	responses(
 		(status = 200, body = InventoryVariable),
-		(status = 400, description = "Not a usable variable name", body = ProblemDetailsSchema),
+		(status = 400, description = "Not a usable variable name, or `ansible_host` outside machine scope", body = ProblemDetailsSchema),
 		(status = 404, description = "No such server group or machine", body = ProblemDetailsSchema),
 		(status = 502, description = "The secret store is unavailable", body = ProblemDetailsSchema),
 	),
@@ -159,6 +160,7 @@ pub async fn set(
 ) -> Result<Json<InventoryVariable>> {
 	let scope = VariableScope::from(args.scope);
 	check_name(&args.name)?;
+	check_machine_scoped(scope, &args.name)?;
 
 	let mut conn = state.db.get().await?;
 	check_scope(&mut conn, scope).await?;
@@ -178,9 +180,12 @@ pub async fn set(
 
 	let kube = secret_store(&state)?;
 	let secret = scope.secret_name();
-	let mut keys = kube.try_read_keys(&secret).await?.unwrap_or_default();
+	let mut keys = kube
+		.try_read_secret_keys(&secret)
+		.await?
+		.unwrap_or_default();
 	keys.insert(args.name.clone(), stored(&args.value));
-	kube.put_keys(&secret, &keys).await?;
+	kube.put_secret_keys(&secret, &keys).await?;
 
 	Ok(Json(
 		InventoryVariable::set(&mut conn, scope, &args.name, None, Some(&admin.0.login)).await?,
@@ -226,8 +231,8 @@ pub async fn remove(
 
 /// A value for the secret store, which holds strings. Its JSON encoding, so a
 /// value round-trips as the type it was set as.
-fn stored(value: &Value) -> String {
-	value.to_string()
+fn stored(value: &Value) -> SecretString {
+	SecretString::from(value.to_string())
 }
 
 /// The value behind a name the secret store may be holding. Called where a
@@ -236,7 +241,7 @@ fn stored(value: &Value) -> String {
 async fn forget_secret_value(state: &AppState, scope: VariableScope, name: &str) -> Result<()> {
 	let kube = secret_store(state)?;
 	let secret = scope.secret_name();
-	let Some(mut keys) = kube.try_read_keys(&secret).await? else {
+	let Some(mut keys) = kube.try_read_secret_keys(&secret).await? else {
 		return Ok(());
 	};
 	if keys.remove(name).is_none() {
@@ -245,7 +250,7 @@ async fn forget_secret_value(state: &AppState, scope: VariableScope, name: &str)
 	if keys.is_empty() {
 		kube.delete_password(&secret).await
 	} else {
-		kube.put_keys(&secret, &keys).await
+		kube.put_secret_keys(&secret, &keys).await
 	}
 }
 
@@ -266,6 +271,17 @@ fn check_name(name: &str) -> Result<()> {
 	{
 		return Err(AppError::BadRequest(format!(
 			"{name:?} is not a usable variable name: letters, digits, `-`, `.` and `_` only"
+		)));
+	}
+	Ok(())
+}
+
+/// `ansible_host` names one machine, so a wider scope would give every machine
+/// in the environment the same address.
+fn check_machine_scoped(scope: VariableScope, name: &str) -> Result<()> {
+	if name == super::inventory::ANSIBLE_HOST && !matches!(scope, VariableScope::Machine { .. }) {
+		return Err(AppError::BadRequest(format!(
+			"{name:?} names one machine, so it is set on a machine rather than on a group or an environment"
 		)));
 	}
 	Ok(())

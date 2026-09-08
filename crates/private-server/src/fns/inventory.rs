@@ -14,6 +14,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use algae_cli::passphrases::{ExposeSecret, SecretString};
 use axum::Json;
 use axum::extract::State;
 use canopy_utoipa_axum::{router::OpenApiRouter, routes};
@@ -42,7 +43,7 @@ use crate::state::AppState;
 
 /// The variable naming the address a run connects to, which overrides the one
 /// canopy holds for the machine.
-const ANSIBLE_HOST: &str = "ansible_host";
+pub(super) const ANSIBLE_HOST: &str = "ansible_host";
 
 pub fn routes() -> OpenApiRouter<AppState> {
 	OpenApiRouter::new()
@@ -484,7 +485,7 @@ pub async fn lease_for_group(
 	responses(
 		(status = 200, body = InventoryView),
 		(status = 404, description = "No such lease", body = ProblemDetailsSchema),
-		(status = 409, description = "The lease is someone else's, no longer holds, or the environment is gone", body = ProblemDetailsSchema),
+		(status = 409, description = "The lease is someone else's, no longer holds, the environment is gone, or two machines share an address", body = ProblemDetailsSchema),
 		(status = 502, description = "A secret variable could not be read", body = ProblemDetailsSchema),
 	),
 )]
@@ -497,9 +498,7 @@ pub async fn for_group(
 	let lease = InventoryLease::get(&mut conn, args.lease_id).await?;
 	held_by_caller(&lease, &admin.0.login)?;
 	if !lease.holds_at(Timestamp::now()) {
-		return Err(AppError::Conflict(
-			"that lease has expired; take one again before reading the inventory".into(),
-		));
+		return Err(AppError::Conflict(no_longer_held(&lease, &admin.0.login)));
 	}
 
 	let environment = resolve_environment(
@@ -622,6 +621,7 @@ pub async fn for_group(
 		});
 	}
 	hosts.sort_by(|a, b| a.name.cmp(&b.name));
+	reject_shared_address(&hosts)?;
 
 	Ok(Json(InventoryView {
 		group_id: group.id,
@@ -631,6 +631,25 @@ pub async fn for_group(
 		secret_vars: wide.secret,
 		hosts,
 	}))
+}
+
+/// Two machines at one address would have a run configure one box twice and
+/// leave the other untouched.
+fn reject_shared_address(hosts: &[InventoryHost]) -> Result<()> {
+	let mut seen: BTreeMap<&str, &str> = BTreeMap::new();
+	for host in hosts {
+		let Some(address) = host.address.as_deref() else {
+			continue;
+		};
+		if let Some(other) = seen.insert(address, &host.name) {
+			return Err(AppError::Conflict(format!(
+				"machines {other:?} and {:?} are both reached at {address:?}; \
+				 an `ansible_host` variable on one of them has to say which box it is",
+				host.name
+			)));
+		}
+	}
+	Ok(())
 }
 
 /// Variables gathered from one or more scopes, with the names among them whose
@@ -650,14 +669,15 @@ impl Scoped {
 		scope: VariableScope,
 		variables: &[InventoryVariable],
 	) -> Result<()> {
-		let secrets = if variables.iter().any(|variable| variable.is_secret) {
-			super::inventory_variables::secret_store(state)?
-				.try_read_keys(&scope.secret_name())
-				.await?
-				.unwrap_or_default()
-		} else {
-			BTreeMap::new()
-		};
+		let secrets: BTreeMap<String, SecretString> =
+			if variables.iter().any(|variable| variable.is_secret) {
+				super::inventory_variables::secret_store(state)?
+					.try_read_secret_keys(&scope.secret_name())
+					.await?
+					.unwrap_or_default()
+			} else {
+				BTreeMap::new()
+			};
 
 		for variable in variables {
 			let value = match &variable.value {
@@ -669,6 +689,9 @@ impl Scoped {
 							variable.name
 						))
 					})?;
+					// Exposed once, into the value this inventory exists to
+					// serve to the run holding the lease.
+					let held = held.expose_secret();
 					serde_json::from_str(held).unwrap_or_else(|_| Value::String(held.to_owned()))
 				}
 			};
@@ -710,6 +733,21 @@ fn held_by_caller(lease: &InventoryLease, login: &str) -> Result<()> {
 	match lease.held_by.as_deref() {
 		Some(who) if who == login => Ok(()),
 		_ => Err(AppError::Conflict(held_by_another(lease))),
+	}
+}
+
+/// Why a lease stopped holding, which decides whether taking another is the
+/// whole answer: an operator whose lease was taken over is walking into work
+/// somebody else has started.
+fn no_longer_held(lease: &InventoryLease, login: &str) -> String {
+	match lease.released_by.as_deref() {
+		Some(who) if who != login => {
+			format!("that lease was taken over by {who}; talk to them before taking another")
+		}
+		Some(_) => {
+			"that lease has been released; take one again before reading the inventory".into()
+		}
+		None => "that lease has expired; take one again before reading the inventory".into(),
 	}
 }
 

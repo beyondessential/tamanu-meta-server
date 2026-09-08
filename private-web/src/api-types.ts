@@ -14706,7 +14706,7 @@ export interface operations {
                     "application/json": components["schemas"]["ProblemDetailsSchema"];
                 };
             };
-            /** @description The lease is someone else's, no longer holds, or the environment is gone */
+            /** @description The lease is someone else's, no longer holds, the environment is gone, or two machines share an address */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -14936,7 +14936,7 @@ export interface operations {
                     "application/json": components["schemas"]["InventoryVariable"];
                 };
             };
-            /** @description Not a usable variable name */
+            /** @description Not a usable variable name, or `ansible_host` outside machine scope */
             400: {
                 headers: {
                     [name: string]: unknown;
